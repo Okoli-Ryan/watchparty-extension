@@ -23,3 +23,9 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Store submission material — kept local, deliberately out of the public source.
+# PRIVACY.md carries a personal contact address and still has to be hosted at a
+# public URL of its own before either store will accept a submission.
+STORE_LISTING.md
+PRIVACY.md

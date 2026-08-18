@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { watchRooms, isRoomLive, roomsRef } from '../../firebase/rooms';
 import { sendBg } from '../bg';
 import { ext } from '../../shared/ext';
+import { hostOf } from '../../shared/url';
 import type { Room, UserProfile } from '../../shared/types';
 
 /** Open the full-page dashboard in a new tab. */
@@ -141,12 +142,4 @@ export function RoomList({ me: _me }: { me: UserProfile }) {
       </button>
     </div>
   );
-}
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
 }

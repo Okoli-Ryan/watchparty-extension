@@ -3,6 +3,7 @@ import { watchRoom } from '../../firebase/rooms';
 import { watchMembers, isFresh, freshnessRef } from '../../firebase/presence';
 import { sendBg } from '../bg';
 import { openDashboard } from './RoomList';
+import { hostOf } from '../../shared/url';
 import type { Member, Room } from '../../shared/types';
 import type { AttachState } from '../../shared/messages';
 
@@ -99,12 +100,4 @@ export function RoomView({ roomId, myUid, onLeave }: { roomId: string; myUid: st
       </button>
     </div>
   );
-}
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
 }

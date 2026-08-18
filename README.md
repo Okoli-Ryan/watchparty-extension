@@ -10,8 +10,6 @@ seek in realtime. Ownership hands off automatically when the owner leaves.
 
 - **[DECISIONS.md](DECISIONS.md)** — why the architecture is shaped this way, one entry per major decision with the constraint that forced it and what it costs.
 - **[HANDOVER.md](HANDOVER.md)** — start here if you are picking this up: current state, where things live, traps that have already bitten, and known gaps.
-- **[STORE_LISTING.md](STORE_LISTING.md)** — copy-paste pack for the Chrome and Edge dashboards.
-- **[PRIVACY.md](PRIVACY.md)** — privacy policy (must be hosted at a public URL before publishing).
 - **WatchParty-Test-Plan.xlsx** — 113 manual test cases plus 11 regression checks.
 
 ## How it maps to the acceptance criteria

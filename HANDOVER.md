@@ -159,9 +159,16 @@ mapping each failure to its cause.
 
 ## Publishing
 
-`STORE_LISTING.md` has the finished copy: descriptions, category, data
-disclosures and written permission justifications. `PRIVACY.md` is written but
-**must be hosted at a public URL** and have its contact address filled in.
+Two documents cover this, and **both are gitignored** — they carry submission
+copy and a personal contact address, so they stay out of the public repo. Ask
+the maintainer for them:
+
+- `STORE_LISTING.md` — finished copy: descriptions, category, data disclosures
+  and written permission justifications.
+- `PRIVACY.md` — the privacy policy. Written and complete, but it still **must
+  be hosted at a public URL** (a Gist or GitHub Pages will do) before either
+  store will accept a submission.
+
 Screenshots still need capturing. Unlisted (Chrome) / Hidden (Edge) suits an
 admin-provisioned tool and draws far less review scrutiny.
 
