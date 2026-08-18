@@ -1,0 +1,101 @@
+/* Full-page dashboard. The popup stylesheet pins html/body to the 340px popup
+   width, so those constraints are undone here. */
+
+html, body.dashboard {
+  width: auto;
+  min-height: 100vh;
+}
+
+body.dashboard #root {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+}
+
+.dash-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 18px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+}
+.dash-head h1 { font-size: 22px; margin-bottom: 4px; }
+.dash-head .sub { font-size: 13px; color: var(--muted); }
+.dash-head button { width: auto; margin: 0; padding: 8px 14px; }
+
+.dash-tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+.dash-tabs button {
+  width: auto; margin: 0; padding: 9px 18px; font-size: 13px;
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+}
+.dash-tabs button.active { background: var(--accent); border-color: var(--accent); }
+
+.dash-section h2 { font-size: 15px; color: var(--text); margin-bottom: 14px; }
+
+/* Room cards laid out as a responsive grid instead of the popup's single column. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.rcard {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rcard .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.rcard .rname {
+  font-size: 14px; font-weight: 600; line-height: 1.3;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rcard .rhost {
+  font-size: 11px; color: var(--muted); margin-top: 3px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rcard .dates { display: grid; gap: 4px; font-size: 11px; }
+.rcard .dline { display: flex; justify-content: space-between; gap: 10px; }
+.rcard .dline .dk { color: var(--muted); }
+.rcard .actions { display: flex; gap: 8px; }
+.rcard .actions button { width: auto; flex: 1; margin: 0; padding: 7px 10px; font-size: 12px; }
+
+.star {
+  background: none; border: none; cursor: pointer; padding: 0;
+  font-size: 17px; line-height: 1; width: auto; margin: 0; flex-shrink: 0;
+}
+.star:hover { filter: brightness(1.25); }
+
+.pager {
+  display: flex; align-items: center; justify-content: center;
+  gap: 14px; margin-top: 22px;
+}
+.pager button { width: auto; margin: 0; padding: 8px 16px; font-size: 12px; }
+.pager .page-info { font-size: 12px; color: var(--muted); }
+
+.setting {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  cursor: pointer;
+  font-size: 13px;
+  margin: 0;
+}
+.setting input[type='checkbox'] {
+  width: 17px;
+  height: 17px;
+  margin-top: 1px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.dash-empty {
+  text-align: center; color: var(--muted); font-size: 13px;
+  padding: 44px 0; border: 1px dashed var(--border); border-radius: 10px;
+}

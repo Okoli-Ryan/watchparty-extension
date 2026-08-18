@@ -1,0 +1,36 @@
+{
+  "name": "watchparty-extension",
+  "version": "0.1.0",
+  "description": "Sync any webpage's HTML5 video across viewers in realtime via Firebase Firestore — a watch-party browser extension.",
+  "license": "MIT",
+  "author": "Okoli Ryan",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "watch": "vite build --watch",
+    "build:firefox": "npm run build && node scripts/build-firefox.mjs",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@medv/finder": "^4.0.2",
+    "firebase": "^11.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.0.0-beta.28",
+    "@types/chrome": "^0.0.287",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "@firebase/util@1.12.1": true,
+    "protobufjs@7.6.5": true
+  }
+}

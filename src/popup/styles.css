@@ -1,0 +1,127 @@
+:root {
+  --bg: #14141e;
+  --panel: #1e1e2c;
+  --panel-2: #262636;
+  --text: #f2f2f7;
+  --muted: #9a9ab0;
+  --accent: #6c5ce7;
+  --accent-hover: #7d6ef0;
+  --danger: #e74c6c;
+  --ok: #2ecc71;
+  --border: #33334a;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  width: 340px;
+  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+#root { padding: 14px; }
+
+h1 { font-size: 16px; margin: 0 0 2px; }
+h2 { font-size: 13px; margin: 0 0 8px; color: var(--muted); font-weight: 600; }
+p { margin: 0 0 8px; font-size: 13px; line-height: 1.4; }
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.header .sub { font-size: 11px; color: var(--muted); }
+
+label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+
+input, select {
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 13px;
+}
+input:focus, select:focus { outline: none; border-color: var(--accent); }
+
+button {
+  width: 100%;
+  padding: 10px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 12px;
+}
+button:hover { background: var(--accent-hover); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.secondary { background: var(--panel-2); border: 1px solid var(--border); }
+button.secondary:hover { background: var(--panel); }
+button.danger { background: var(--danger); }
+button.link {
+  width: auto; background: none; color: var(--accent);
+  padding: 0; margin: 0; font-weight: 600;
+}
+button.btn-signout {
+  width: auto; margin: 0; padding: 6px 12px; font-size: 12px;
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  white-space: nowrap; flex-shrink: 0;
+}
+button.btn-signout:hover { background: var(--danger); border-color: var(--danger); }
+
+.row { display: flex; gap: 8px; }
+.row > * { flex: 1; }
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.room {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.room .meta { min-width: 0; }
+.room .name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.room .owner { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.room button { width: auto; margin: 0; padding: 7px 12px; font-size: 12px; }
+
+.badge {
+  display: inline-block; font-size: 10px; font-weight: 700;
+  padding: 2px 7px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.4px;
+}
+.badge.owner { background: rgba(108,92,231,0.25); color: #b9aefc; }
+.badge.viewer { background: rgba(46,204,113,0.2); color: #7fe0a6; }
+.badge.ended { background: rgba(154,154,176,0.18); color: var(--muted); }
+
+.card.ended { opacity: 0.62; }
+.dot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--muted); margin-right: 5px; vertical-align: middle;
+}
+.dot.live { background: var(--ok); box-shadow: 0 0 0 3px rgba(46,204,113,0.18); }
+
+.alert { padding: 8px 10px; border-radius: 8px; font-size: 12px; margin: 8px 0; }
+.alert.error { background: rgba(231,76,108,0.15); color: #f2a3b5; border: 1px solid rgba(231,76,108,0.35); }
+.alert.ok { background: rgba(46,204,113,0.15); color: #8fe6b0; border: 1px solid rgba(46,204,113,0.35); }
+.alert.info { background: rgba(108,92,231,0.15); color: #b9aefc; border: 1px solid rgba(108,92,231,0.35); }
+
+.muted { color: var(--muted); font-size: 12px; }
+.mono { font-family: ui-monospace, Menlo, monospace; font-size: 11px; word-break: break-all; }
+.empty { text-align: center; color: var(--muted); font-size: 12px; padding: 20px 0; }
+.tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.tabs button { width: auto; margin: 0; padding: 6px 12px; font-size: 12px; background: var(--panel-2); }
+.tabs button.active { background: var(--accent); }
+.spacer { height: 4px; }

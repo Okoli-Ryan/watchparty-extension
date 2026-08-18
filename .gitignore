@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Build output — regenerate with `npm run build` / `npm run build:firefox`.
+# dist-firefox/ and the packaged zips contain the Firebase web config baked in
+# from .env, so they must never be committed.
+dist/
+dist-firefox/
+*.zip
+
+# Local environment — never commit real Firebase config
+.env
+.env.*
+!.env.example
+*.local
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
