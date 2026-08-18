@@ -144,9 +144,28 @@ mapping each failure to its cause.
 - **MV3 worker suspension** can still stall presence if a tab is hidden and idle.
   Fully solving it needs `chrome.alarms` (30s minimum), which would mean
   loosening `STALE_MS` and slowing handoff — a real trade-off, not an oversight.
-- **`<all_urls>`** is the biggest obstacle to store approval. If the group only
-  uses a few sites, narrowing it in `manifest.config.ts` is the highest-leverage
-  change available.
+- **Broad host permissions** are still the biggest obstacle to store approval.
+  `<all_urls>` has been narrowed to `*://*/*` (equivalent for http/https, drops
+  the file:// and ftp:// claim) and the unused `scripting` permission removed,
+  but the breadth itself is load-bearing: the background NAVIGATES a viewer's tab
+  to the room's page and then waits for that page's content script to send
+  `HELLO`. There is no user gesture there, so `activeTab` cannot substitute.
+
+  Two ways out, neither taken yet:
+  1. **Narrow to a site list** in `manifest.config.ts`. Best review outcome, ends
+     the "any webpage" premise. Right answer if a deployment only uses a few
+     sites.
+  2. **Optional host permissions** — ship with none, call
+     `chrome.permissions.request()` when the user creates or joins a room, then
+     `chrome.scripting.registerContentScripts()` for the granted origin (this is
+     what would re-earn the `scripting` permission). Correct long-term, but
+     `permissions.request()` needs a user gesture on an extension page and Chrome
+     often closes the **popup** when the permission dialog takes focus — so the
+     grant flow has to move to the dashboard or an onboarding page first.
+
+  Until then: publish **Unlisted (Chrome) / Hidden (Edge)**. For an
+  admin-provisioned tool that is the intended distribution anyway, and it draws
+  far less review scrutiny than a public listing asking for every host.
 - **Icons are generated placeholders** (a purple play triangle), fine to ship
   but not designed.
 - **No automated tests.** The pure logic in `presence.ts`, `crypto.ts` and
@@ -181,4 +200,5 @@ admin-provisioned tool and draws far less review scrutiny.
 2. Fix the sign-out gap; it is small and user-visible.
 3. Add unit tests for `presence.ts` (freshness, ownership reconciliation) — that
    file has produced more bugs than any other and is pure logic.
-4. Decide on `<all_urls>` before attempting store submission.
+4. Decide how to handle the broad host permission before attempting store
+   submission — the options are laid out under "Known gaps".

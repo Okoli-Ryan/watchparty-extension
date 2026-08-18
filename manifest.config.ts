@@ -36,7 +36,12 @@ export default defineManifest({
   },
   content_scripts: [
     {
-      matches: ['<all_urls>'],
+      // `*://*/*` rather than `<all_urls>`: the two are equivalent for http and
+      // https, but `<all_urls>` additionally claims file:// and ftp://, which
+      // this extension never syncs. Reviewers read the broader pattern as an
+      // unjustified ask, and file:// access needs a manual per-user toggle
+      // anyway, so the wider form buys nothing.
+      matches: ['*://*/*'],
       js: ['src/content/index.ts'],
       run_at: 'document_idle',
       // Players are frequently embedded from a third-party host in a
@@ -46,6 +51,15 @@ export default defineManifest({
       all_frames: true,
     },
   ],
-  permissions: ['tabs', 'storage', 'scripting', 'activeTab'],
-  host_permissions: ['<all_urls>'],
+  // `scripting` was declared but never called — every unused permission is one
+  // more thing a reviewer asks about, so it is gone. It would only be needed if
+  // this moved to optional host permissions and registered content scripts at
+  // runtime (see the note in HANDOVER.md).
+  permissions: ['tabs', 'storage', 'activeTab'],
+  // Breadth is load-bearing, not laziness: a viewer's tab is NAVIGATED to the
+  // room's page by the background, and the content script must already be there
+  // to send HELLO — there is no user gesture on that fresh page for activeTab to
+  // hang off. Narrowing this to a site list is possible if a deployment only
+  // ever uses a few sites; it would end the "any webpage" premise.
+  host_permissions: ['*://*/*'],
 });

@@ -115,7 +115,7 @@ select `dist-firefox/manifest.json`.
 
 Three things differ on Firefox, and the first one will bite you:
 
-- **Host permissions are opt-in.** Under Firefox MV3, `<all_urls>` is *requested*
+- **Host permissions are opt-in.** Under Firefox MV3, `*://*/*` is *requested*
   but not granted at install. Until you approve it (Add-ons Manager → the
   extension → **Permissions** → allow access to all sites), the content script
   never runs and the picker reports that it cannot reach the page.
