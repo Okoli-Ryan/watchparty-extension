@@ -10,7 +10,6 @@ seek in realtime. Ownership hands off automatically when the owner leaves.
 
 - **[DECISIONS.md](DECISIONS.md)** — why the architecture is shaped this way, one entry per major decision with the constraint that forced it and what it costs.
 - **[HANDOVER.md](HANDOVER.md)** — start here if you are picking this up: current state, where things live, traps that have already bitten, and known gaps.
-- **[INSTALL.md](INSTALL.md)** — distributing it without a store: signed `.crx` plus enterprise-policy install for Chrome, Edge and Brave, with automatic updates.
 - **WatchParty-Test-Plan.xlsx** — 113 manual test cases plus 11 regression checks.
 
 ## How it maps to the acceptance criteria

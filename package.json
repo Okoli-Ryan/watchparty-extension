@@ -11,8 +11,7 @@
     "build": "tsc --noEmit && vite build",
     "watch": "vite build --watch",
     "build:firefox": "npm run build && node scripts/build-firefox.mjs",
-    "preview": "vite preview",
-    "pack": "npm run build && node scripts/pack.mjs"
+    "preview": "vite preview"
   },
   "dependencies": {
     "@medv/finder": "^4.0.2",
@@ -26,7 +25,6 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
-    "crx3": "^2.0.0",
     "typescript": "^5.7.2",
     "vite": "^6.0.3"
   },

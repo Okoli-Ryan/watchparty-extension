@@ -1,13 +1,9 @@
 import { defineManifest } from '@crxjs/vite-plugin';
-import pkg from './package.json';
 
 export default defineManifest({
   manifest_version: 3,
   name: 'WatchParty Sync',
-  // Single source of truth. Policy-installed browsers only pull an update when
-  // the manifest version increases, so a version bumped in package.json but not
-  // here would ship a release nobody ever receives.
-  version: pkg.version,
+  version: '0.1.0',
   description: 'Sync any webpage video across viewers in realtime — a watch party.',
   // Both stores reject a submission without a 128px icon; the smaller sizes are
   // used in the toolbar and the extensions page.
