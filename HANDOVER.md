@@ -14,7 +14,7 @@ play, pause and seek in realtime through Firebase Firestore. It also has
 encrypted room chat, reactions, per-user history and favourites, and a full-page
 dashboard.
 
-All seven original acceptance criteria are implemented (access control, click-to-pick
+All seven original acceptance criteria are implemented (access control, keyboard-driven
 room creation, room discovery, realtime playback control, ownership handoff on
 exit, and error handling for uncontrollable players).
 

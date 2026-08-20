@@ -3,7 +3,7 @@ import { HEARTBEAT_MS } from '../shared/constants';
 import { log, warn } from '../shared/log';
 import { ext } from '../shared/ext';
 import { getSettings, watchSettings, getWidgetPos, saveWidgetPos } from '../shared/settings';
-import { hasVideo, startPicker, stopPicker } from './picker';
+import { startPicker, stopPicker, highlightPick, showPickBanner, takePick } from './picker';
 import { VideoController } from './videoController';
 import { Widget } from './widget';
 
@@ -44,14 +44,17 @@ function send(msg: ContentToBg) {
 function handle(msg: BgToContent) {
   switch (msg.t) {
     case 'PICK':
-      // Only frames that actually hold a video arm the overlay, so the top
-      // document doesn't cover an embedded player and eat its clicks.
-      if (!hasVideo()) {
-        log('content', 'PICK ignored — no video in this frame', location.origin);
-        return;
-      }
-      send({ t: 'PICK_READY' });
+      // EVERY frame arms, even one with no video. Key events only reach the
+      // frame holding focus — which may be an ad iframe — so all of them have to
+      // listen and forward. Frames with nothing to offer simply report an empty
+      // candidate list. (Under the old click-to-select picker only frames with a
+      // video armed, because the overlay that caught the mouse would otherwise
+      // cover an embedded player. There is no such overlay any more.)
       startPicker({
+        isTop: window.top === window.self,
+        onCandidates: (videos) => send({ t: 'PICK_CANDIDATES', videos }),
+        onNav: (delta) => send({ t: 'PICK_NAV', delta }),
+        onConfirm: () => send({ t: 'PICK_CONFIRM' }),
         onPick: (r) =>
           send({
             t: 'PICK_RESULT',
@@ -64,6 +67,18 @@ function handle(msg: BgToContent) {
         onError: (reason) => send({ t: 'PICK_ERROR', reason }),
         onCancel: () => send({ t: 'PICK_ERROR', reason: 'cancelled' }),
       });
+      break;
+
+    case 'PICK_HIGHLIGHT':
+      highlightPick(msg.index);
+      break;
+
+    case 'PICK_BANNER':
+      showPickBanner(msg.position, msg.total, msg.label);
+      break;
+
+    case 'PICK_TAKE':
+      takePick(msg.index);
       break;
 
     case 'PICK_CANCEL':

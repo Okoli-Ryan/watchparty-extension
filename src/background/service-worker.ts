@@ -228,9 +228,38 @@ let knownMembers = new Set<string>();
 // disconnect as the old page unloads — that must NOT be treated as leaving the
 // room; we're about to re-attach on the new page.
 const pendingNav = new Set<number>();
-// Frames that armed a picker overlay for the current pick request, so we can
-// tell "no video anywhere in this tab" from "the user is still choosing".
-let pickArmed = 0;
+/**
+ * Every video offered by every frame in the tab being picked from, merged into
+ * one list ordered most-likely-first.
+ *
+ * The picker is keyboard-driven, and no frame can own the cursor: a frame sees
+ * only its own videos and only receives key events while it holds focus. So the
+ * background holds the list, moves the cursor, and tells each frame which of
+ * ITS videos (if any) to highlight.
+ */
+interface PickCandidate {
+  frameKey: string;
+  /** Index within that frame's own ranked list. */
+  localIndex: number;
+  score: number;
+  label: string;
+}
+let pickCandidates: PickCandidate[] = [];
+/**
+ * Tracked by identity rather than list position: frames report in as they load,
+ * so the merged order shifts underneath a selection the user has already moved.
+ */
+let pickSelected: { frameKey: string; localIndex: number } | null = null;
+/**
+ * True once the user has pressed an arrow key. Until then the cursor snaps to
+ * the best candidate as frames report in — a player iframe usually loads after
+ * the top document, and whoever reported first would otherwise keep the
+ * selection and leave the user starting on the wrong video.
+ */
+let pickUserMoved = false;
+/** A pick is in progress in `pickTabId`, so frames loading late still get armed. */
+let picking = false;
+let pickTabId: number | null = null;
 let pickTimer: ReturnType<typeof setTimeout> | undefined;
 /**
  * What the current pick is for: creating a brand-new room, or repointing the
@@ -252,6 +281,104 @@ const framesInTab = (tabId: number) => [...ports.values()].filter((f) => f.tabId
 function clearPickTimer() {
   if (pickTimer) clearTimeout(pickTimer);
   pickTimer = undefined;
+}
+
+function resetPick() {
+  clearPickTimer();
+  pickCandidates = [];
+  pickSelected = null;
+  pickUserMoved = false;
+  picking = false;
+  pickTabId = null;
+}
+
+/** Arm every frame in the tab and start collecting candidates. */
+function beginPick(tabId: number, mode: 'create' | 'reselect') {
+  resetPick();
+  pickMode = mode;
+  picking = true;
+  pickTabId = tabId;
+  framesInTab(tabId).forEach((f) => f.port.postMessage({ t: 'PICK' } as BgToContent));
+}
+
+/** Stop every frame's picker and forget the cursor. */
+function endPick(tabId: number) {
+  framesInTab(tabId).forEach((f) => f.port.postMessage({ t: 'PICK_CANCEL' } as BgToContent));
+  resetPick();
+}
+
+/** Position of the tracked selection in the merged list, or -1. */
+function selectedIndex(): number {
+  if (!pickSelected) return -1;
+  return pickCandidates.findIndex(
+    (c) => c.frameKey === pickSelected!.frameKey && c.localIndex === pickSelected!.localIndex,
+  );
+}
+
+/**
+ * Push the current cursor to the frames: the owning frame highlights its local
+ * index, every other armed frame clears, and the top frame's banner updates.
+ */
+function pushPickUi(tabId: number) {
+  const idx = selectedIndex();
+  const chosen = idx >= 0 ? pickCandidates[idx] : null;
+
+  for (const f of framesInTab(tabId)) {
+    const key = frameKey(f.tabId, f.frameId);
+    const index = chosen && chosen.frameKey === key ? chosen.localIndex : null;
+    f.port.postMessage({ t: 'PICK_HIGHLIGHT', index } as BgToContent);
+  }
+
+  broadcastToTopFrame(tabId, {
+    t: 'PICK_BANNER',
+    position: idx + 1,
+    total: pickCandidates.length,
+    label: chosen?.label ?? '',
+  });
+}
+
+/** Merge one frame's report into the list, keeping the selection stable. */
+function onPickCandidates(
+  key: string,
+  tabId: number,
+  videos: { score: number; label: string }[],
+) {
+  pickCandidates = pickCandidates.filter((c) => c.frameKey !== key);
+  videos.forEach((v, localIndex) =>
+    pickCandidates.push({ frameKey: key, localIndex, score: v.score, label: v.label }),
+  );
+  pickCandidates.sort((a, b) => b.score - a.score);
+
+  // Snap to the best candidate until the user takes over, and re-snap whenever
+  // the selection has gone (its frame reloaded, or the video was removed).
+  if (!pickUserMoved || selectedIndex() < 0) {
+    pickSelected = pickCandidates[0]
+      ? { frameKey: pickCandidates[0].frameKey, localIndex: pickCandidates[0].localIndex }
+      : null;
+  }
+  log('bg', `frame ${key} offered ${videos.length} video(s)`, `total=${pickCandidates.length}`);
+  pushPickUi(tabId);
+}
+
+/** Move the cursor, wrapping at both ends. */
+function movePick(tabId: number, delta: number) {
+  if (pickCandidates.length === 0) return;
+  pickUserMoved = true;
+  const from = selectedIndex();
+  const next = (((from < 0 ? 0 : from + delta) % pickCandidates.length) + pickCandidates.length) %
+    pickCandidates.length;
+  const c = pickCandidates[next];
+  pickSelected = { frameKey: c.frameKey, localIndex: c.localIndex };
+  pushPickUi(tabId);
+}
+
+/** Enter: ask the frame that owns the selection to resolve it to a selector. */
+function confirmPick() {
+  const idx = selectedIndex();
+  if (idx < 0) return warn('bg', 'Enter pressed with nothing selected');
+  const c = pickCandidates[idx];
+  log('bg', `confirming pick ${idx + 1}/${pickCandidates.length}`, `frame=${c.frameKey}`);
+  ports.get(c.frameKey)?.port.postMessage({ t: 'PICK_TAKE', index: c.localIndex } as BgToContent);
 }
 
 /** The frame in `tabId` whose origin matches the room's ('' = the top frame). */
@@ -683,6 +810,13 @@ async function handleContentMessage(key: string, tabId: number, msg: ContentToBg
         conn.origin = msg.origin;
         conn.isTop = msg.isTop;
       }
+      // A player iframe routinely finishes loading after the user has already
+      // hit "Create a room". Arm it now, or its video — usually THE video —
+      // never appears in the list.
+      if (picking && pickTabId === tabId) {
+        log('bg', `frame ${key} connected mid-pick → arming`);
+        conn?.port.postMessage({ t: 'PICK' } as BgToContent);
+      }
       if (session && session.tabId === tabId) {
         if (msg.isTop) {
           pendingNav.delete(tabId); // top document finished loading
@@ -697,9 +831,22 @@ async function handleContentMessage(key: string, tabId: number, msg: ContentToBg
       break;
     }
 
-    case 'PICK_READY':
-      pickArmed += 1;
-      log('bg', `frame ${key} armed picker`, `(${pickArmed} frame(s) with video)`);
+    // All three are only meaningful for the pick actually in progress. A frame
+    // left armed in some other tab (or a late message from a cancelled pick)
+    // must not move the cursor.
+    case 'PICK_CANDIDATES':
+      if (!picking || pickTabId !== tabId) return;
+      onPickCandidates(key, tabId, msg.videos);
+      break;
+
+    case 'PICK_NAV':
+      if (!picking || pickTabId !== tabId) return;
+      movePick(tabId, msg.delta);
+      break;
+
+    case 'PICK_CONFIRM':
+      if (!picking || pickTabId !== tabId) return;
+      confirmPick();
       break;
 
     case 'HEARTBEAT':
@@ -837,13 +984,10 @@ async function handleContentMessage(key: string, tabId: number, msg: ContentToBg
       if (!session || session.tabId !== tabId || session.role !== 'owner') return;
       const frames = framesInTab(tabId);
       if (frames.length === 0) return warn('bg', 'no frames to pick from');
-      pickMode = 'reselect';
-      pickArmed = 0;
-      clearPickTimer();
-      frames.forEach((f) => f.port.postMessage({ t: 'PICK' } as BgToContent));
+      beginPick(tabId, 'reselect');
       log('bg', `reselect PICK → ${frames.length} frame(s)`);
       pickTimer = setTimeout(() => {
-        if (pickArmed === 0) {
+        if (pickCandidates.length === 0) {
           lastError = 'No playable video found on this page.';
           pushRoomInfo();
         }
@@ -882,20 +1026,19 @@ async function handleContentMessage(key: string, tabId: number, msg: ContentToBg
       break;
 
     case 'PICK_ERROR':
+      // Escape (or a failure) reaches us from whichever frame had focus, but
+      // every frame is armed and holding a highlight — tear all of them down.
       if (msg.reason !== 'cancelled') lastError = msg.reason;
+      endPick(tabId);
       await ext.action.setBadgeText({ text: '' }).catch(() => undefined);
       break;
   }
 }
 
 async function onPickResult(tabId: number, msg: Extract<ContentToBg, { t: 'PICK_RESULT' }>) {
-  clearPickTimer();
-  // Every frame holding a video armed an overlay, but only one of them was
-  // clicked. The rest must be told to stand down — their overlay is fixed and
-  // full-viewport and swallows every click in that frame, so a page whose top
-  // document has its own <video> alongside an embedded player became
-  // unclickable once the user picked inside the iframe.
-  framesInTab(tabId).forEach((f) => f.port.postMessage({ t: 'PICK_CANCEL' } as BgToContent));
+  // Every frame is armed and holding a highlight; only one produced the result.
+  // Tear all of them down, or the losers keep their overlay on screen.
+  endPick(tabId);
   // A picked video inside an iframe reports that FRAME's url/title. Viewers must
   // navigate to the top-level page instead, so take it from the tab. Embed URLs
   // also carry per-session tokens, so we persist only the frame's origin.
@@ -980,14 +1123,12 @@ async function handlePopupMessage(msg: PopupRequest): Promise<PopupResponse> {
       }
       // Ask every frame; only those holding a video will arm an overlay.
       lastError = null;
-      pickMode = 'create';
-      pickArmed = 0;
-      clearPickTimer();
-      frames.forEach((f) => f.port.postMessage({ t: 'PICK' } as BgToContent));
+      beginPick(tab.id, 'create');
       log('bg', `PICK → ${frames.length} frame(s) in tab ${tab.id}`);
-      // If nothing armed shortly after, there's genuinely no reachable video.
+      // If no frame offered a candidate shortly after, there's genuinely no
+      // reachable video — every armed frame reports, even an empty one.
       pickTimer = setTimeout(() => {
-        if (pickArmed === 0) {
+        if (pickCandidates.length === 0) {
           lastError =
             'No playable video found on this page. The player may be blocked or not loaded yet.';
           void ext.action.setBadgeText({ text: '!' }).catch(() => undefined);
@@ -998,11 +1139,11 @@ async function handlePopupMessage(msg: PopupRequest): Promise<PopupResponse> {
     }
 
     case 'CANCEL_PICKER': {
-      const tab = await activeTab();
-      clearPickTimer();
-      if (tab?.id != null) {
-        framesInTab(tab.id).forEach((f) => f.port.postMessage({ t: 'PICK_CANCEL' } as BgToContent));
-      }
+      // Prefer the tab the pick actually started in: the popup may have been
+      // reopened over a different tab since.
+      const tabId = pickTabId ?? (await activeTab())?.id;
+      if (tabId != null) endPick(tabId);
+      else resetPick();
       return { ok: true };
     }
 

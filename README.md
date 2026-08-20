@@ -1,7 +1,7 @@
 # WatchParty Sync — browser extension
 
 Turn any webpage's HTML5 `<video>` into a synchronized watch party. A room owner
-picks a video with a LocatorJS-style click-to-select overlay; the page URL, a
+picks a video by stepping through the page's players with the arrow keys; the page URL, a
 robust CSS selector, and playback state are stored in **Firebase Firestore**;
 other logged-in users join and their player mirrors the owner's play / pause /
 seek in realtime. Ownership hands off automatically when the owner leaves.
@@ -17,7 +17,7 @@ seek in realtime. Ownership hands off automatically when the owner leaves.
 | # | Requirement | Where |
 |---|---|---|
 | 1 | Admin/user access control; admin creates users, users log in on the widget | `firebase/users.ts` (secondary-app create), `firebase/auth.ts`, `popup/views/{Login,AdminUsers}.tsx`, `firestore.rules` |
-| 2 | Logged-in user creates a room via a click-to-select video overlay | `content/picker.ts` (overlay + `@medv/finder` selector) |
+| 2 | Logged-in user creates a room by choosing a video on the page | `content/picker.ts` (keyboard picker + `@medv/finder` selector), `content/videoScan.ts` (ranking) |
 | 3 | On confirmation, Firestore stores URL + selector + currentTime; user names the room | `popup/views/CreateRoom.tsx`, `firebase/rooms.ts` |
 | 4 | A second user sees active rooms and opens one | `popup/views/RoomList.tsx`, background auto-navigates the tab |
 | 5 | Owner controls playback; play/pause/seek mirror in realtime | `content/videoController.ts`, `firebase/rooms.ts` (`writePlayback` / `watchRoom`) |
@@ -141,9 +141,11 @@ extension's reload icon to pick up changes).
 
 1. Log in as the admin → **Users** tab → create `user1` and `user2`.
 2. In one Chrome profile, sign in as **user1**. Open a page with a plain HTML5
-   video (e.g. any `.mp4` or an `<video>` test page). Click **Create a room**,
-   click the video in the overlay, name the room, **Create & host**. Confirm a
-   doc appears under `rooms` in Firestore.
+   video (e.g. any `.mp4` or an `<video>` test page). Click **Create a room** —
+   a banner appears at the top of the page with the first video already
+   highlighted. Press **↑ ↓** (or **← →**) to step through the page's videos,
+   **Enter** to choose one, **Esc** to back out. Name the room, **Create &
+   host**. Confirm a doc appears under `rooms` in Firestore.
 3. In a second profile (or another machine), sign in as **user2**. The room
    shows under **Active rooms** → **Join** → the tab navigates to the URL and a
    "Click to start watching together" button appears; click it.

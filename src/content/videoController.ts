@@ -1,5 +1,6 @@
 import { DRIFT_THRESHOLD, ELEMENT_WAIT_MS } from '../shared/constants';
 import { log, warn, fail } from '../shared/log';
+import { bestVideo } from './videoScan';
 import type { MemberRole, PlaybackState } from '../shared/types';
 
 // Pure-DOM controller: attaches to a <video> by selector and either emits the
@@ -20,44 +21,6 @@ export interface ControllerCallbacks {
 
 export const NOT_FOUND_MESSAGE =
   "Couldn't find the video. Start playback on the page, then press Retry.";
-
-/** Every <video> in the document, including inside open shadow roots. */
-function collectVideos(root: Document | ShadowRoot = document): HTMLVideoElement[] {
-  const found: HTMLVideoElement[] = [...root.querySelectorAll('video')];
-  // querySelector doesn't pierce shadow boundaries, so walk them explicitly —
-  // several player frameworks mount the <video> inside a shadow root.
-  for (const el of root.querySelectorAll('*')) {
-    const shadow = (el as HTMLElement).shadowRoot;
-    if (shadow) found.push(...collectVideos(shadow));
-  }
-  return found;
-}
-
-/**
- * Rank candidate videos so a fallback picks the real player rather than a
- * hidden preview or an advert. Prefers visible, large, loaded, playing media.
- */
-function scoreVideo(v: HTMLVideoElement): number {
-  const r = v.getBoundingClientRect();
-  const visible = r.width > 1 && r.height > 1;
-  if (!visible) return -1;
-  let score = r.width * r.height;
-  if (Number.isFinite(v.duration) && v.duration > 0) score += 250_000;
-  if (v.readyState > 0) score += 250_000;
-  if (!v.paused) score += 500_000;
-  // Very short media is usually a background loop or an ad bumper.
-  if (Number.isFinite(v.duration) && v.duration > 0 && v.duration < 30) score -= 400_000;
-  return score;
-}
-
-/** Best guess at the page's main video, or null if there isn't a usable one. */
-function bestVideo(): HTMLVideoElement | null {
-  const ranked = collectVideos()
-    .map((v) => ({ v, s: scoreVideo(v) }))
-    .filter((c) => c.s >= 0)
-    .sort((a, b) => b.s - a.s);
-  return ranked[0]?.v ?? null;
-}
 
 export class VideoController {
   private video: HTMLVideoElement | null = null;

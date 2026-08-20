@@ -1,6 +1,25 @@
 import { finder } from '@medv/finder';
+import { rankedVideos, type VideoCandidate } from './videoScan';
 
-// LocatorJS-style click-to-select overlay, scoped to <video> elements.
+// Keyboard-driven video picker.
+//
+// The user steps through the page's videos with the arrow keys — ordered most-
+// likely-first by `rankedVideos()` — and confirms with Enter. The candidate in
+// focus wears the highlight overlay.
+//
+// WHY NOT CLICK-TO-SELECT (what this replaced): selecting by click needed a
+// transparent full-viewport overlay to catch the mouse, and that overlay sat
+// above embedded players and swallowed their clicks. Streaming sites put the
+// real player in a cross-origin iframe, so the top document's overlay was
+// covering exactly the thing you wanted to click. Keyboard selection needs no
+// click target at all, so every element here is `pointer-events: none` and the
+// page underneath stays completely interactive.
+//
+// FRAMES: this script runs in every frame, and each frame can only see its own
+// videos and only receives key events when it holds focus. So no frame can own
+// the selection. Each reports its candidates to the background, which merges
+// them into one ranked list and drives the highlight; every armed frame forwards
+// key presses. The banner renders in the top frame only, like the widget.
 
 export interface PickResult {
   selector: string;
@@ -12,17 +31,25 @@ export interface PickResult {
 }
 
 type Callbacks = {
+  /** This frame's videos, best first. Sent even when empty. */
+  onCandidates: (videos: { score: number; label: string }[]) => void;
+  /** An arrow key was pressed here; the background owns the actual cursor. */
+  onNav: (delta: number) => void;
+  onConfirm: () => void;
   onPick: (result: PickResult) => void;
   onError: (reason: string) => void;
   onCancel: () => void;
 };
 
 let active = false;
-let overlay: HTMLDivElement | null = null;
+let isTopFrame = false;
 let highlight: HTMLDivElement | null = null;
 let label: HTMLDivElement | null = null;
 let banner: HTMLDivElement | null = null;
-let current: HTMLVideoElement | null = null;
+/** This frame's candidates, in the same order the background indexes them. */
+let candidates: VideoCandidate[] = [];
+/** Which local candidate is highlighted, or null when the selection is elsewhere. */
+let currentIndex: number | null = null;
 let cbs: Callbacks | null = null;
 
 const Z = 2147483000; // sit above virtually everything
@@ -32,25 +59,17 @@ function styleEl(el: HTMLElement, styles: Partial<CSSStyleDeclaration>) {
 }
 
 function buildUi() {
-  overlay = document.createElement('div');
-  styleEl(overlay, {
-    position: 'fixed',
-    inset: '0',
-    zIndex: String(Z),
-    cursor: 'crosshair',
-    background: 'transparent',
-  });
-
   highlight = document.createElement('div');
   styleEl(highlight, {
     position: 'fixed',
     pointerEvents: 'none',
-    border: '2px solid #6c5ce7',
-    background: 'rgba(108, 92, 231, 0.15)',
-    borderRadius: '4px',
+    border: '3px solid #6c5ce7',
+    background: 'rgba(108, 92, 231, 0.22)',
+    borderRadius: '6px',
+    boxShadow: '0 0 0 2000px rgba(0, 0, 0, 0.45)',
     zIndex: String(Z + 1),
     display: 'none',
-    transition: 'all 60ms ease-out',
+    transition: 'top 90ms ease-out, left 90ms ease-out, width 90ms ease-out, height 90ms ease-out',
   });
 
   label = document.createElement('div');
@@ -67,50 +86,54 @@ function buildUi() {
     whiteSpace: 'nowrap',
   });
 
+  document.body.append(highlight, label);
+
+  // The banner is the top frame's job: the video may be in a nested player
+  // iframe, but the instructions belong over the whole page.
+  if (!isTopFrame) return;
   banner = document.createElement('div');
   styleEl(banner, {
     position: 'fixed',
-    top: '12px',
+    top: '18px',
     left: '50%',
     transform: 'translateX(-50%)',
     zIndex: String(Z + 3),
-    padding: '8px 14px',
-    borderRadius: '999px',
-    background: 'rgba(20,20,30,0.9)',
+    minWidth: '320px',
+    maxWidth: '90vw',
+    padding: '14px 20px',
+    borderRadius: '14px',
+    background: 'rgba(18,18,28,0.96)',
     color: '#fff',
-    font: '500 13px/1.2 system-ui, sans-serif',
-    boxShadow: '0 4px 16px rgba(0,0,0,0.35)',
+    font: '400 13px/1.45 system-ui, sans-serif',
+    boxShadow: '0 10px 40px rgba(0,0,0,0.55)',
+    border: '1px solid rgba(255,255,255,0.12)',
+    textAlign: 'center',
     pointerEvents: 'none',
   });
-  banner.textContent = 'Click a video to sync it · Esc to cancel';
-
-  document.body.append(overlay, highlight, label, banner);
+  banner.innerHTML = `
+    <div style="font:700 15px/1.3 system-ui,sans-serif;margin-bottom:8px">
+      Choose the video to sync
+    </div>
+    <div data-wp="status" style="color:#c3b9ff;font-weight:600;margin-bottom:8px">
+      Looking for videos…
+    </div>
+    <div style="color:#9a9ab0;font-size:12px">
+      <b style="color:#fff">↑ ↓</b> or <b style="color:#fff">← →</b> to browse
+      &nbsp;·&nbsp; <b style="color:#fff">Enter</b> to select
+      &nbsp;·&nbsp; <b style="color:#fff">Esc</b> to cancel
+    </div>`;
+  document.body.append(banner);
 }
 
-/** Find the topmost <video> at a point, seeing through our transparent overlay. */
-function videoAt(x: number, y: number): HTMLVideoElement | null {
-  // Temporarily let clicks pass through the overlay so elementsFromPoint sees
-  // the page, not our own overlay div.
-  overlay!.style.pointerEvents = 'none';
-  const stack = document.elementsFromPoint(x, y);
-  overlay!.style.pointerEvents = 'auto';
-  for (const el of stack) {
-    if (el instanceof HTMLVideoElement) return el;
-    // A poster/overlay often sits atop the <video>; check descendants too.
-    const v = (el as HTMLElement).querySelector?.('video');
-    if (v instanceof HTMLVideoElement) return v;
-  }
-  return null;
-}
-
-function paint(video: HTMLVideoElement | null) {
-  current = video;
-  if (!video || !highlight || !label) {
-    if (highlight) highlight.style.display = 'none';
-    if (label) label.style.display = 'none';
+/** Draw the highlight over `el`, or hide it when there is nothing selected. */
+function paint(el: HTMLVideoElement | null) {
+  if (!highlight || !label) return;
+  if (!el) {
+    highlight.style.display = 'none';
+    label.style.display = 'none';
     return;
   }
-  const r = video.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
   styleEl(highlight, {
     display: 'block',
     top: `${r.top}px`,
@@ -118,38 +141,56 @@ function paint(video: HTMLVideoElement | null) {
     width: `${r.width}px`,
     height: `${r.height}px`,
   });
-  const w = Math.round(r.width);
-  const h = Math.round(r.height);
-  label.textContent = `<video> ${w}×${h}`;
+  label.textContent = candidates[currentIndex ?? 0]?.label ?? '<video>';
   styleEl(label, {
     display: 'block',
-    top: `${Math.max(4, r.top - 26)}px`,
-    left: `${r.left}px`,
+    // Below the box when it is flush against the top of the viewport.
+    top: r.top > 34 ? `${r.top - 28}px` : `${r.top + 6}px`,
+    left: `${Math.max(4, r.left)}px`,
   });
 }
 
-function onMove(e: MouseEvent) {
+function repaint() {
   if (!active) return;
-  paint(videoAt(e.clientX, e.clientY));
+  paint(currentIndex === null ? null : (candidates[currentIndex]?.el ?? null));
 }
 
-function onClick(e: MouseEvent) {
+/**
+ * Highlight one of this frame's candidates, or clear when the background has
+ * moved the selection into a different frame.
+ */
+export function highlightPick(index: number | null) {
   if (!active) return;
-  e.preventDefault();
-  e.stopPropagation();
-  const video = videoAt(e.clientX, e.clientY);
+  currentIndex = index;
+  const el = index === null ? null : candidates[index]?.el;
+  if (el) {
+    const r = el.getBoundingClientRect();
+    const offscreen = r.bottom < 0 || r.top > window.innerHeight;
+    if (offscreen) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+  paint(el ?? null);
+}
+
+/** Update the top frame's banner. No-op in every other frame. */
+export function showPickBanner(position: number, total: number, text: string) {
+  const status = banner?.querySelector<HTMLElement>('[data-wp="status"]');
+  if (!status) return;
+  status.textContent = total === 0 ? 'No video found on this page' : `Video ${position} of ${total} · ${text}`;
+}
+
+/**
+ * Resolve one of this frame's candidates into a stored selector and report it.
+ * Called when the user pressed Enter and the background determined that the
+ * selection lives here.
+ */
+export function takePick(index: number) {
+  const video = candidates[index]?.el;
   if (!video) {
-    // Clicked empty space or a non-video element — ignore, keep picking.
+    cbs?.onError('That video is no longer on the page.');
     return;
   }
   try {
-    // A <video> living inside a cross-origin iframe never reaches this document,
-    // so anything we can see here is same-document and controllable. Guard the
-    // selector generation itself in case of exotic DOMs.
-    const selector = finder(video, {
-      root: document.body,
-      timeoutMs: 1000,
-    });
+    const selector = finder(video, { root: document.body, timeoutMs: 1000 });
     // Verify the selector actually round-trips to the same node.
     if (document.querySelector(selector) !== video) {
       finish();
@@ -172,43 +213,53 @@ function onClick(e: MouseEvent) {
 }
 
 function onKey(e: KeyboardEvent) {
-  if (active && e.key === 'Escape') {
+  if (!active) return;
+  const nav =
+    e.key === 'ArrowDown' || e.key === 'ArrowRight'
+      ? 1
+      : e.key === 'ArrowUp' || e.key === 'ArrowLeft'
+        ? -1
+        : 0;
+
+  if (nav === 0 && e.key !== 'Enter' && e.key !== 'Escape') return;
+
+  // Streaming players bind arrows to seek and Enter to fullscreen. Swallow the
+  // event in the capture phase so picking never disturbs the page underneath.
+  e.preventDefault();
+  e.stopPropagation();
+
+  if (e.key === 'Escape') {
     finish();
     cbs?.onCancel();
+    return;
   }
+  if (e.key === 'Enter') {
+    cbs?.onConfirm();
+    return;
+  }
+  cbs?.onNav(nav);
 }
 
-function onScrollOrResize() {
-  if (active) paint(current);
-}
-
-/**
- * Does THIS frame hold a video? The content script runs in every frame, so the
- * background arms only the frames that answer yes — otherwise the top document's
- * full-page overlay would sit above the player iframe and swallow every click
- * before the player's own overlay could see it.
- */
-export function hasVideo(): boolean {
-  return !!document.querySelector('video');
-}
-
-export function startPicker(callbacks: Callbacks) {
-  if (active) return;
+export function startPicker(callbacks: Callbacks & { isTop: boolean }) {
+  if (active || !document.body) return;
   cbs = callbacks;
-  // Frames without a video stay passive — the background reports the "no video
-  // anywhere" case after polling every frame.
-  if (!hasVideo() || !document.body) return;
+  isTopFrame = callbacks.isTop;
   active = true;
+  currentIndex = null;
+  candidates = rankedVideos();
   buildUi();
-  overlay!.addEventListener('mousemove', onMove, true);
-  overlay!.addEventListener('click', onClick, true);
+
+  // Every frame listens, including ones with no video: key events only reach
+  // the frame that holds focus, and that may well be an ad iframe.
   window.addEventListener('keydown', onKey, true);
-  window.addEventListener('scroll', onScrollOrResize, true);
-  window.addEventListener('resize', onScrollOrResize, true);
+  window.addEventListener('scroll', repaint, true);
+  window.addEventListener('resize', repaint, true);
+
+  callbacks.onCandidates(candidates.map((c) => ({ score: c.score, label: c.label })));
 }
 
 /**
- * Tear the overlay down without reporting a cancellation.
+ * Tear the picker down without reporting a cancellation.
  *
  * Every caller is the background telling us to stop (PICK_CANCEL, DETACH), so
  * it already knows. Firing `onCancel()` here sent a spurious PICK_ERROR that
@@ -221,14 +272,13 @@ export function stopPicker() {
 
 function finish() {
   active = false;
+  currentIndex = null;
+  candidates = [];
   window.removeEventListener('keydown', onKey, true);
-  window.removeEventListener('scroll', onScrollOrResize, true);
-  window.removeEventListener('resize', onScrollOrResize, true);
-  overlay?.removeEventListener('mousemove', onMove, true);
-  overlay?.removeEventListener('click', onClick, true);
+  window.removeEventListener('scroll', repaint, true);
+  window.removeEventListener('resize', repaint, true);
   banner?.remove();
-  overlay?.remove();
   highlight?.remove();
   label?.remove();
-  overlay = highlight = label = banner = current = null;
+  highlight = label = banner = null;
 }

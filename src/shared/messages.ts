@@ -61,6 +61,16 @@ export type PopupResponse =
 export type BgToContent =
   | { t: 'PICK' } // enter picker mode
   | { t: 'PICK_CANCEL' }
+  // The picker is keyboard-driven and each frame sees only its own videos, so
+  // the background owns the cursor across all of them and tells one frame to
+  // highlight a local index while the others clear (index: null).
+  | { t: 'PICK_HIGHLIGHT'; index: number | null }
+  // Banner state, addressed to the TOP frame — the video may sit in a nested
+  // player iframe but the instructions belong over the whole page.
+  | { t: 'PICK_BANNER'; position: number; total: number; label: string }
+  // Enter was pressed and the selection resolves to this frame: turn the local
+  // index into a selector and answer with PICK_RESULT.
+  | { t: 'PICK_TAKE'; index: number }
   | {
       t: 'ATTACH';
       roomId: string;
@@ -118,7 +128,12 @@ export type ContentToBg =
   // uses `origin` to route ATTACH to the frame that holds the video.
   | { t: 'HELLO'; origin: string; isTop: boolean }
   | { t: 'HEARTBEAT' } // keeps the SW alive while attached
-  | { t: 'PICK_READY' } // this frame has a video and armed its overlay
+  // This frame's videos, already ranked best-first. Sent by every armed frame
+  // including those with none, so the background can tell "still loading" from
+  // "there is genuinely no video anywhere in this tab".
+  | { t: 'PICK_CANDIDATES'; videos: { score: number; label: string }[] }
+  | { t: 'PICK_NAV'; delta: number } // arrow key pressed in this frame
+  | { t: 'PICK_CONFIRM' } // Enter pressed in this frame
   | {
       t: 'PICK_RESULT';
       selector: string;

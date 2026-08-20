@@ -156,13 +156,19 @@ the `VideoController` attaches in whichever frame holds the `<video>` while the
 widget always renders in the top frame.
 
 **Why.** Streaming sites embed players in cross-origin iframes. Extensions
-*can* inject there (unlike page JS), but the top document's overlay would
-otherwise swallow the picker's clicks, and a widget inside the player frame is
-clipped to it and destroyed on every iframe reload.
+*can* inject there (unlike page JS), but a widget inside the player frame is
+clipped to it and destroyed on every iframe reload, so the widget stays in the
+top document while the controller goes where the video is.
 
 **Gotcha.** Keying ports by tab alone silently dropped every frame but the
 last. Rooms store `frameOrigin` (not the full embed URL) because embed URLs
 carry per-session tokens.
+
+**Historical note.** This split used to be forced by the picker as well: the
+old click-to-select overlay covered the top document and swallowed clicks meant
+for the embedded player. The keyboard picker (entry 18) has no click target at
+all, so that particular pressure is gone — the widget reasoning above still
+stands on its own.
 
 ---
 
@@ -236,3 +242,44 @@ create, join) and status.
 **Why.** The widget is where the user actually is while watching, and it
 persists; the popup closes on focus loss. Duplicating controls meant two
 implementations to keep in sync.
+
+---
+
+## 18. The picker is keyboard-driven, and the background owns the cursor
+
+**Decision.** Selecting a video is: a banner in the top frame, arrow keys to
+step through the page's players in likelihood order, Enter to confirm. Not a
+click. Every element the picker draws is `pointer-events: none`.
+
+**Why.** Click-to-select needed a transparent full-viewport overlay to catch the
+mouse — and on the sites this extension exists for, that overlay sat directly on
+top of the embedded player the user was trying to click. The top document's
+overlay was covering the one thing worth picking. Keyboard selection needs no
+click target, so the page underneath stays fully interactive and the whole class
+of overlay-vs-player conflicts disappears.
+
+**Consequence: no frame can own the selection.** A frame sees only its own
+videos, and only receives key events while it holds focus. So the background
+merges every frame's ranked candidates into one list, moves the cursor, and
+tells one frame to highlight a local index while the rest clear. Every frame
+arms — including ones with no video, because focus may well be in an ad iframe
+and the keystroke has to be forwarded from wherever it lands.
+
+**Ordering is `videoScan.ts`,** shared with `VideoController`'s fallback, so the
+video offered first is the same one the controller would fall back to if the
+stored selector later stops matching.
+
+**Two traps this created.**
+
+1. *Selection stability vs. late frames.* Player iframes report after the top
+   document, which reorders the merged list underneath the cursor. Selection is
+   tracked by identity (`frameKey` + local index), not list position — and until
+   the user presses a key it re-snaps to the best candidate, or whoever reported
+   first would keep a selection the user never made.
+2. *Cancelling is global.* Escape arrives from whichever frame had focus, but
+   every frame is armed and holding a highlight. All exits — Escape, a completed
+   pick, the popup's cancel — go through `endPick()`, which stops every frame.
+
+**Cost.** Arrow keys and Enter are swallowed in the capture phase while picking,
+because streaming players bind them to seek and fullscreen. That is deliberate,
+and it is why the picker must always tear down completely.
