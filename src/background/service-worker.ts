@@ -27,7 +27,14 @@ import { recordAttendance } from '../firebase/history';
 import { sendMessage, watchMessages } from '../firebase/chat';
 import { importRoomKey, deriveKeyFromPassphrase, checkVerifier } from '../shared/crypto';
 import { log, warn, fail } from '../shared/log';
-import type { ChatMessage, Member, MemberRole, Room, UserProfile } from '../shared/types';
+import type {
+  ChatMessage,
+  Member,
+  MemberRole,
+  PlaybackState,
+  Room,
+  UserProfile,
+} from '../shared/types';
 import {
   PORT_NAME,
   PENDING_PICK_KEY,
@@ -124,6 +131,8 @@ let lastRoomTouch = 0;
 let sessionStartedAt = 0;
 /** Media length reported by the video frame; 0 until metadata loads. */
 let videoDuration = 0;
+/** The owner's latest playhead, reported on the heartbeat, written on the touch. */
+let hostPosition: { currentTime: number; isPlaying: boolean } | null = null;
 /** No ownership handoff for this long after joining. */
 const JOIN_GRACE_MS = 4000;
 /** Identity of the last playback state pushed to the viewer. */
@@ -166,7 +175,7 @@ function startPresenceTimer() {
     // if every client vanishes without a clean leave.
     if (s.role === 'owner' && Date.now() - lastRoomTouch > ROOM_TOUCH_MS) {
       lastRoomTouch = Date.now();
-      await touchRoom(s.roomId).catch((e) => warn('bg', 'touchRoom failed', e));
+      await touchRoom(s.roomId, hostPosition).catch((e) => warn('bg', 'touchRoom failed', e));
     }
     recountWatchers();
   }, HEARTBEAT_MS);
@@ -511,6 +520,7 @@ async function startSession(
   lastMembers = [];
   sessionStartedAt = Date.now();
   videoDuration = 0; // re-reported by the new video frame on attach
+  hostPosition = null;
   presentMembers = [];
   lastVideoSig = videoSignature(room); // baseline: don't treat this as a change
   startPresenceTimer();
@@ -758,13 +768,34 @@ function broadcastToTab(_tabId: number, msg: BgToContent): boolean {
 }
 
 /**
- * How long ago the host published the room's current playback, measured on the
- * calibrated server clock. Never compare `updatedAt` to `Date.now()` directly —
- * see DECISIONS.md #6.
+ * The freshest trustworthy statement of where the host is, and how old it is.
+ *
+ * `playback` only changes when the host ACTS (DECISIONS.md #10), so between
+ * actions it ages without bound — and extrapolating from it assumes the host
+ * played continuously at a constant rate ever since. Any stall on their side
+ * (buffering, an ad break, a throttled background tab) leaves the real position
+ * behind the projection by exactly the stall, and a viewer who kept playing is
+ * ahead by the same amount. The two errors cancel, so drift computes to ~0 and
+ * "Sync with host" reports "Already in sync" while the viewer is visibly ahead.
+ *
+ * `hostPosition` is refreshed on the room heartbeat and is inert to viewers, so
+ * preferring it whenever it is newer bounds that blind spot to one touch
+ * interval instead of the whole session.
  */
-function playbackAgeMs(): number {
-  const writtenAt = currentRoom?.playback?.updatedAt?.toMillis?.() ?? 0;
-  return writtenAt ? Math.max(0, serverNow() - writtenAt) : 0;
+function resyncAnchor(): { playback: PlaybackState; elapsedMs: number } | null {
+  if (!currentRoom) return null;
+  const pb = currentRoom.playback;
+  const pbAt = pb?.updatedAt?.toMillis?.() ?? 0;
+  const hp = currentRoom.hostPosition;
+  const hpAt = hp?.updatedAt?.toMillis?.() ?? 0;
+  if (hp && hpAt > pbAt) {
+    return {
+      playback: { ...pb, currentTime: hp.currentTime, isPlaying: hp.isPlaying, updatedAt: hp.updatedAt },
+      elapsedMs: Math.max(0, serverNow() - hpAt),
+    };
+  }
+  // Never compare `updatedAt` to `Date.now()` directly — see DECISIONS.md #6.
+  return { playback: pb, elapsedMs: pbAt ? Math.max(0, serverNow() - pbAt) : 0 };
 }
 
 /**
@@ -882,9 +913,16 @@ async function handleContentMessage(key: string, tabId: number, msg: ContentToBg
 
     case 'HEARTBEAT':
       // Presence writes are driven by the background's own timer (see
-      // startPresenceTimer). This message exists only to keep the MV3 service
+      // startPresenceTimer). This message exists mainly to keep the MV3 service
       // worker alive while a tab is attached — the content script's interval is
       // subject to background-tab throttling and can't be trusted for presence.
+      //
+      // It also carries the host's playhead. Throttling is fine here: a stale
+      // cached position is simply not written, and `hostPosition` carries its
+      // own timestamp so a late one can never look fresher than it is.
+      if (session?.role === 'owner' && session.frameKey === key && msg.currentTime != null) {
+        hostPosition = { currentTime: msg.currentTime, isPlaying: !!msg.isPlaying };
+      }
       break;
 
     case 'VIDEO_EVENT': {
@@ -930,14 +968,19 @@ async function handleContentMessage(key: string, tabId: number, msg: ContentToBg
       // is projected forward to where the host is NOW rather than rewound to
       // wherever they were when they last wrote.
       if (session && session.role === 'viewer' && session.frameKey === key && currentRoom) {
-        const age = playbackAgeMs();
-        log('bg', `viewer attached → RESYNC (host state is ${Math.round(age / 1000)}s old)`);
-        broadcastToTab(session.tabId, {
-          t: 'RESYNC',
-          playback: currentRoom.playback,
-          elapsedMs: age,
-        });
-        lastAppliedSig = playbackSignature(currentRoom);
+        const anchor = resyncAnchor();
+        if (anchor) {
+          log(
+            'bg',
+            `viewer attached → RESYNC (anchor is ${Math.round(anchor.elapsedMs / 1000)}s old)`,
+          );
+          broadcastToTab(session.tabId, {
+            t: 'RESYNC',
+            playback: anchor.playback,
+            elapsedMs: anchor.elapsedMs,
+          });
+          lastAppliedSig = playbackSignature(currentRoom);
+        }
       }
       break;
 
@@ -992,16 +1035,20 @@ async function handleContentMessage(key: string, tabId: number, msg: ContentToBg
         return;
       }
       if (!currentRoom) return;
-      // How long ago the host published this state, measured on the calibrated
-      // server clock. The content script can't work this out itself: its own
-      // copy may be old, and comparing a server timestamp to a local clock is
-      // exactly the skew bug we removed elsewhere.
-      const elapsedMs = playbackAgeMs();
-      log('bg', `viewer requested resync (host state is ${Math.round(elapsedMs / 1000)}s old)`);
+      // The anchor carries its own age, measured on the calibrated server clock.
+      // The content script can't work this out itself: its own copy may be old,
+      // and comparing a server timestamp to a local clock is exactly the skew
+      // bug we removed elsewhere.
+      const anchor = resyncAnchor();
+      if (!anchor) return;
+      log(
+        'bg',
+        `viewer requested resync (anchor is ${Math.round(anchor.elapsedMs / 1000)}s old)`,
+      );
       broadcastToTab(session.tabId, {
         t: 'RESYNC',
-        playback: currentRoom.playback,
-        elapsedMs,
+        playback: anchor.playback,
+        elapsedMs: anchor.elapsedMs,
       });
       break;
     }

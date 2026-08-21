@@ -8,6 +8,15 @@ import { CHAT_MAX_LEN } from '../shared/constants';
 
 const HOST_ID = 'watchparty-widget-host';
 const Z = 2147483600; // above the picker overlay and the page's own chrome
+/** Keep at least this much of the widget's box inside the viewport (px). */
+const MARGIN = 8;
+
+/** Constrain a top-left position so a w×h box stays fully on screen. */
+function clampToViewport(x: number, y: number, w: number, h: number): WidgetPos {
+  const maxX = Math.max(MARGIN, window.innerWidth - w - MARGIN);
+  const maxY = Math.max(MARGIN, window.innerHeight - h - MARGIN);
+  return { x: Math.min(Math.max(MARGIN, x), maxX), y: Math.min(Math.max(MARGIN, y), maxY) };
+}
 
 /** Persisted widget position, in px from the viewport's top-left. */
 export interface WidgetPos {
@@ -80,6 +89,8 @@ export class Widget {
   private dragMoved = false;
   /** Structure currently built, so updates can patch instead of rebuilding. */
   private builtFor: string | null = null;
+  /** Size at the previous render, so a resize can re-anchor before it clips. */
+  private lastSize: { w: number; h: number } | null = null;
 
   constructor(private cbs: WidgetCallbacks) {}
 
@@ -102,6 +113,7 @@ export class Widget {
     // rebuild of the pill/panel and never affect its render signature.
     this.root.innerHTML = `<style>${CSS}</style><div class="toasts"></div><div class="wrap"></div>`;
     document.body.appendChild(this.host);
+    window.addEventListener('resize', this.onViewportResize);
     this.render();
   }
 
@@ -163,8 +175,11 @@ export class Widget {
 
   /** Restore a saved position (called once, after mount). */
   setPosition(pos: WidgetPos | null) {
-    if (!pos) return;
-    this.pos = pos;
+    if (!pos || !this.host) return;
+    // Clamp on restore: the position may have been saved on a larger window, or
+    // on another monitor entirely.
+    const r = this.host.getBoundingClientRect();
+    this.pos = clampToViewport(pos.x, pos.y, r.width, r.height);
     this.applyPosition();
   }
 
@@ -189,9 +204,7 @@ export class Widget {
       // Keep it on screen whatever the viewport size.
       const w = rect.width || 60;
       const h = rect.height || 40;
-      const x = Math.min(Math.max(0, ev.clientX - offX), Math.max(0, window.innerWidth - w));
-      const y = Math.min(Math.max(0, ev.clientY - offY), Math.max(0, window.innerHeight - h));
-      this.pos = { x, y };
+      this.pos = clampToViewport(ev.clientX - offX, ev.clientY - offY, w, h);
       this.applyPosition();
     };
 
@@ -218,6 +231,48 @@ export class Widget {
       bottom: 'auto',
     } as Partial<CSSStyleDeclaration>);
   }
+
+  /**
+   * Keep the widget on screen when it changes size (expand ⇄ collapse, chat
+   * opening, the roster growing).
+   *
+   * Until it is dragged the host is anchored `bottom/right`, so it grows up and
+   * left and stays put. `applyPosition()` switches to explicit `left/top` — from
+   * then on it grows DOWN and RIGHT. Expanding a pill parked near the bottom
+   * pushed most of the panel off screen, and collapsing again left the pill
+   * where the panel's top-left corner had been, which reads as the widget
+   * wandering towards the middle of the screen.
+   *
+   * Fix: hold whichever corner the widget is nearest, then clamp.
+   */
+  private reflow() {
+    const host = this.host;
+    if (!host || this.dragging) return;
+    const r = host.getBoundingClientRect();
+    const prev = this.lastSize;
+    this.lastSize = { w: r.width, h: r.height };
+    // No explicit position yet — CSS edge anchoring already does the right
+    // thing, and taking over here would defeat it.
+    if (!this.pos || !prev) return;
+    if (prev.w === r.width && prev.h === r.height) return;
+
+    // Judged from where the box sat BEFORE it resized: `r.left/top` is
+    // unchanged by a top-left-anchored resize, so the old box is prev-sized.
+    const anchorRight = r.left + prev.w / 2 > window.innerWidth / 2;
+    const anchorBottom = r.top + prev.h / 2 > window.innerHeight / 2;
+    const x = anchorRight ? r.left + prev.w - r.width : r.left;
+    const y = anchorBottom ? r.top + prev.h - r.height : r.top;
+    this.pos = clampToViewport(x, y, r.width, r.height);
+    this.applyPosition();
+  }
+
+  /** A smaller viewport can strand a saved position off screen. */
+  private onViewportResize = () => {
+    if (!this.host || !this.pos) return;
+    const r = this.host.getBoundingClientRect();
+    this.pos = clampToViewport(this.pos.x, this.pos.y, r.width, r.height);
+    this.applyPosition();
+  };
 
   private makeDraggable(el: Element | null) {
     el?.addEventListener('pointerdown', (e) => this.beginDrag(e as PointerEvent));
@@ -249,6 +304,7 @@ export class Widget {
   }
 
   destroy() {
+    window.removeEventListener('resize', this.onViewportResize);
     this.host?.remove();
     this.host = null;
     this.root = null;
@@ -272,10 +328,14 @@ export class Widget {
       : `panel:${this.chatOpen}:${this.info?.role ?? '?'}`;
     if (signature === this.builtFor) {
       this.patch(wrap as HTMLElement);
+      // Patching changes height too — chat opening, the roster growing, the
+      // error row appearing — so this is not only for expand/collapse.
+      this.reflow();
       return;
     }
     this.builtFor = signature;
     this.build(wrap as HTMLElement);
+    this.reflow();
   }
 
   /** Update only the volatile parts of the existing structure. */
@@ -726,6 +786,10 @@ const CSS = `
 
 .panel {
   width: 232px; padding: 14px;
+  /* Never taller than the viewport: the roster and chat both grow, and without
+     a cap the panel simply ran off the bottom of the screen. */
+  max-height: calc(100vh - 24px);
+  overflow-y: auto; overscroll-behavior: contain;
   transition: width .16s ease;
   background: rgba(20,20,30,0.97); color: #f2f2f7;
   border: 1px solid #33334a; border-radius: 12px;

@@ -42,6 +42,7 @@ function roomFromSnap(id: string, data: any): Room {
     primaryOwnerUid: data.primaryOwnerUid ?? data.ownerUid,
     primaryOwnerName: data.primaryOwnerName ?? data.ownerName,
     isActive: data.isActive,
+    hostPosition: data.hostPosition ?? null,
     lastActiveAt: data.lastActiveAt ?? null,
     playback: data.playback ?? {
       isPlaying: false,
@@ -174,9 +175,26 @@ export function updateRoomVideo(
   });
 }
 
-/** Owner-only: stamp the room's liveness heartbeat. */
-export function touchRoom(roomId: string): Promise<void> {
-  return updateDoc(roomRef(roomId), { lastActiveAt: serverTimestamp() });
+/**
+ * Owner-only: stamp the room's liveness heartbeat, and refresh where the host's
+ * playhead actually is.
+ *
+ * `hostPosition` is written here rather than into `playback` on purpose. Sync is
+ * event-driven (DECISIONS.md #10) — `playback` changes only when the host ACTS,
+ * and folding a periodic position into it would make every refresh look like a
+ * host action and yank viewers around on a timer. Kept separate, it is inert to
+ * viewers and exists purely so "Sync with host" can measure against something
+ * recent instead of extrapolating across minutes.
+ */
+export function touchRoom(
+  roomId: string,
+  position?: { currentTime: number; isPlaying: boolean } | null,
+): Promise<void> {
+  const patch: Record<string, unknown> = { lastActiveAt: serverTimestamp() };
+  if (position) {
+    patch.hostPosition = { ...position, updatedAt: serverTimestamp() };
+  }
+  return updateDoc(roomRef(roomId), patch);
 }
 
 /** Live subscription to a single room doc. */

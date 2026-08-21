@@ -132,7 +132,11 @@ export type ContentToBg =
   // Every frame announces itself; the background keys ports by tab+frame and
   // uses `origin` to route ATTACH to the frame that holds the video.
   | { t: 'HELLO'; origin: string; isTop: boolean }
-  | { t: 'HEARTBEAT' } // keeps the SW alive while attached
+  // Keeps the SW alive while attached. The OWNER's frame also reports its live
+  // playhead here — it rides the existing 3s beat rather than adding a channel,
+  // and the background forwards it onto the room doc on the slower touch
+  // interval, so "Sync with host" always has a recent anchor.
+  | { t: 'HEARTBEAT'; currentTime?: number; isPlaying?: boolean }
   // This frame's videos, already ranked best-first. Sent by every armed frame
   // including those with none, so the background can tell "still loading" from
   // "there is genuinely no video anywhere in this tab".

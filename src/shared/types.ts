@@ -56,6 +56,15 @@ export interface Room {
   primaryOwnerUid: string;
   primaryOwnerName: string;
   isActive: boolean;
+  /**
+   * The host's live playhead, refreshed on the room heartbeat.
+   *
+   * Deliberately NOT part of `playback`: it must never look like a host action,
+   * or viewers would re-apply it on a timer (DECISIONS.md #10). It exists so
+   * "Sync with host" has a recent anchor instead of extrapolating from one that
+   * may be minutes old.
+   */
+  hostPosition?: { currentTime: number; isPlaying: boolean; updatedAt: Timestamp | null } | null;
   /** Owner-stamped liveness heartbeat; absence/staleness means the room ended. */
   lastActiveAt?: Timestamp | null;
   playback: PlaybackState;

@@ -136,6 +136,24 @@ for when a viewer has genuinely drifted.
 can be minutes old. Anything computing "where is the host now" must project
 forward from a trustworthy elapsed time — see `RESYNC` in the service worker.
 
+**And projection alone is not enough — this bit us.** Extrapolating
+`currentTime + elapsed` assumes the host played *continuously* at a constant
+rate since they last acted. Any stall on their side — buffering, an ad break, a
+throttled background tab — leaves their real position behind the projection by
+exactly the stall. A viewer who kept playing is ahead by that same amount, so
+the two errors cancel: drift computes to ~0 and **"Sync with host" reported
+"already in sync" while the viewer was visibly seconds ahead.** The error grows
+with `elapsed`, which is unbounded.
+
+The fix is a second, cheaper anchor. `rooms/{id}.hostPosition` carries the
+host's actual playhead, refreshed on the existing room-touch interval (the
+position rides the content script's heartbeat up to the background, which folds
+it into the `lastActiveAt` write — no extra round trip). It is deliberately
+**not** part of `playback`: viewers must not treat it as a host action, or they
+would be yanked around on a timer, which is the whole point of this entry.
+`resyncAnchor()` picks whichever of the two is newer, bounding the blind spot to
+one touch interval instead of the whole session.
+
 ---
 
 ## 11. Autoplay is handled in layers, and never with an alert

@@ -109,6 +109,17 @@ export class VideoController {
     this.emit('sync');
   }
 
+  /**
+   * Where this player is right now. Ridden along on the heartbeat so the room
+   * doc can carry a recent host position without a playback write — see
+   * `touchRoom`. Returns null when there is nothing meaningful to report.
+   */
+  position(): { currentTime: number; isPlaying: boolean } | null {
+    const v = this.video;
+    if (!v || !Number.isFinite(v.currentTime)) return null;
+    return { currentTime: v.currentTime, isPlaying: !v.paused };
+  }
+
 
   /**
    * Viewer: jump to where the host should be right now.
@@ -164,8 +175,18 @@ export class VideoController {
     this.remoteReceivedAt = Date.now() - Math.max(0, elapsedMs);
     this.suppressUntil = Date.now() + 800;
 
-    log('viewer', 'manual resync', `drift=${drift.toFixed(2)}s`, `target=${target.toFixed(2)}`);
-    if (actions.length === 0) return 'Already in sync';
+    log(
+      'viewer',
+      'manual resync',
+      `drift=${drift.toFixed(2)}s`,
+      `target=${target.toFixed(2)}`,
+      `anchorAge=${(elapsedMs / 1000).toFixed(1)}s`,
+    );
+    // Report the measured gap rather than a bare "already in sync". The verdict
+    // is only as good as the anchor it was measured against, and a number the
+    // user can compare with what they see on the host's screen makes a bad
+    // anchor obvious instead of silently reassuring.
+    if (actions.length === 0) return `In sync (${Math.abs(drift).toFixed(1)}s off)`;
     return `Synced (${actions.join(', ')})`;
   }
 
@@ -203,8 +224,15 @@ export class VideoController {
     // attached yet, attach() replays this. (Losing it here is what previously
     // left the viewer with no idea what the owner was doing, so the join gate
     // fell back to blindly playing.)
-    this.lastRemote = state;
-    this.remoteReceivedAt = Date.now();
+    // Only restamp when this is genuinely NEW state. Re-applying the same object
+    // — the join gate replaying `lastRemote`, or a retry after the element was
+    // found — must keep the original arrival time, or `projectedTime` collapses
+    // to the raw anchor and rewinds the viewer to wherever the host was when
+    // they last wrote rather than where they are now.
+    if (state !== this.lastRemote) {
+      this.lastRemote = state;
+      this.remoteReceivedAt = Date.now();
+    }
 
     if ((this.role !== 'viewer' && !force) || !this.video) {
       warn('viewer', 'apply deferred — will replay on attach', {

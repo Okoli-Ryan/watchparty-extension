@@ -193,7 +193,11 @@ function startHeartbeat() {
   stopHeartbeat();
   // Heartbeat over the port both drives Firestore presence (background writes
   // the lastSeen) and keeps the MV3 service worker alive while we're attached.
-  heartbeatTimer = window.setInterval(() => send({ t: 'HEARTBEAT' }), HEARTBEAT_MS);
+  heartbeatTimer = window.setInterval(() => {
+    // The owner's playhead rides along; the background only reads it when this
+    // frame is the attached one and we are the host.
+    send({ t: 'HEARTBEAT', ...(controller?.position() ?? {}) });
+  }, HEARTBEAT_MS);
 }
 
 function stopHeartbeat() {
