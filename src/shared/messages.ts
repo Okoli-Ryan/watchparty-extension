@@ -68,6 +68,11 @@ export type BgToContent =
   // Banner state, addressed to the TOP frame — the video may sit in a nested
   // player iframe but the instructions belong over the whole page.
   | { t: 'PICK_BANNER'; position: number; total: number; label: string }
+  // Also top-frame only: scroll the iframe with this origin into view. A
+  // cross-origin child can scroll itself into view inside its own document but
+  // cannot move its parent, so without this the highlight lands in a frame that
+  // is still off screen.
+  | { t: 'PICK_REVEAL'; origin: string }
   // Enter was pressed and the selection resolves to this frame: turn the local
   // index into a selector and answer with PICK_RESULT.
   | { t: 'PICK_TAKE'; index: number }

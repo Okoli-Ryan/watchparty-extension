@@ -3,7 +3,14 @@ import { HEARTBEAT_MS } from '../shared/constants';
 import { log, warn } from '../shared/log';
 import { ext } from '../shared/ext';
 import { getSettings, watchSettings, getWidgetPos, saveWidgetPos } from '../shared/settings';
-import { startPicker, stopPicker, highlightPick, showPickBanner, takePick } from './picker';
+import {
+  startPicker,
+  stopPicker,
+  highlightPick,
+  showPickBanner,
+  revealFrame,
+  takePick,
+} from './picker';
 import { VideoController } from './videoController';
 import { Widget } from './widget';
 
@@ -75,6 +82,10 @@ function handle(msg: BgToContent) {
 
     case 'PICK_BANNER':
       showPickBanner(msg.position, msg.total, msg.label);
+      break;
+
+    case 'PICK_REVEAL':
+      revealFrame(msg.origin);
       break;
 
     case 'PICK_TAKE':

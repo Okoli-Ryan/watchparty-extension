@@ -283,3 +283,19 @@ stored selector later stops matching.
 **Cost.** Arrow keys and Enter are swallowed in the capture phase while picking,
 because streaming players bind them to seek and fullscreen. That is deliberate,
 and it is why the picker must always tear down completely.
+
+**Keeping the selection visible takes two steps.** Landing on a candidate
+scrolls it into view unless it is *fully* on screen — checking only for
+completely-offscreen left a video peeking over the fold unscrolled, with the
+highlight drawn where nobody could see it, and a player bigger than the viewport
+needs the inverse test or it re-scrolls on every keypress. That handles the
+frame's own document. It does not handle the frame itself: a cross-origin child
+cannot scroll its parent, so the background also asks the top frame to reveal the
+owning iframe (`PICK_REVEAL`, matched by origin). When several iframes share an
+origin it scrolls nothing rather than guessing wrong.
+
+**The banner tells the user to press play first.** This is not a nicety: several
+players create no `<video>` element at all until playback starts, so an unstarted
+one is invisible to the picker — and `scoreVideo` ranks a playing video well
+above a stopped one, which is usually the difference between the real player and
+an advert.

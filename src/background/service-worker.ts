@@ -335,6 +335,14 @@ function pushPickUi(tabId: number) {
     total: pickCandidates.length,
     label: chosen?.label ?? '',
   });
+
+  // When the selection lives in a child frame, that frame scrolls the video into
+  // view inside its own document — but it cannot scroll the parent, so the
+  // iframe itself may still be off screen. Only the top frame can fix that.
+  const owner = chosen ? ports.get(chosen.frameKey) : undefined;
+  if (owner && !owner.isTop && owner.origin) {
+    broadcastToTopFrame(tabId, { t: 'PICK_REVEAL', origin: owner.origin });
+  }
 }
 
 /** Merge one frame's report into the list, keeping the selection stable. */

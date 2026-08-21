@@ -121,6 +121,12 @@ function buildUi() {
       <b style="color:#fff">↑ ↓</b> or <b style="color:#fff">← →</b> to browse
       &nbsp;·&nbsp; <b style="color:#fff">Enter</b> to select
       &nbsp;·&nbsp; <b style="color:#fff">Esc</b> to cancel
+    </div>
+    <div style="margin-top:10px;padding-top:9px;border-top:1px solid rgba(255,255,255,0.12);
+                color:#ffd479;font-size:12px;line-height:1.4">
+      ▶ <b>Start the video playing first.</b> Many players don't create the
+      video at all until you hit play, and a stopped one is easy to mistake for
+      an advert.
     </div>`;
   document.body.append(banner);
 }
@@ -163,12 +169,51 @@ export function highlightPick(index: number | null) {
   if (!active) return;
   currentIndex = index;
   const el = index === null ? null : candidates[index]?.el;
-  if (el) {
-    const r = el.getBoundingClientRect();
-    const offscreen = r.bottom < 0 || r.top > window.innerHeight;
-    if (offscreen) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  }
+  if (el) ensureVisible(el);
   paint(el ?? null);
+}
+
+/**
+ * Scroll `el` into view unless it is already fully on screen.
+ *
+ * "Fully" matters: checking only for completely-offscreen left a video with a
+ * few pixels peeking over the fold unscrolled, so the highlight was drawn where
+ * the user couldn't see it. A player LARGER than the viewport can never be
+ * fully visible, so that case instead asks whether it covers the viewport —
+ * otherwise every keypress would re-scroll a full-bleed player.
+ */
+function ensureVisible(el: HTMLElement) {
+  const r = el.getBoundingClientRect();
+  const vh = window.innerHeight;
+  const vw = window.innerWidth;
+  const okY = r.height >= vh ? r.top <= 0 && r.bottom >= vh : r.top >= 0 && r.bottom <= vh;
+  const okX = r.width >= vw ? r.left <= 0 && r.right >= vw : r.left >= 0 && r.right <= vw;
+  if (okY && okX) return;
+  el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+}
+
+/**
+ * Scroll the iframe carrying `origin` into view. Best effort, and only from the
+ * top frame: a cross-origin child cannot scroll its parent, so a video inside an
+ * off-screen iframe scrolls itself into view within a frame that is itself off
+ * screen — the user sees nothing move.
+ *
+ * Matching is by origin because embed URLs carry per-session tokens. When
+ * several iframes share an origin (ad networks, repeated embeds) there is no way
+ * to tell which one holds the video, so nothing is scrolled rather than jumping
+ * somewhere wrong.
+ */
+export function revealFrame(origin: string) {
+  if (!active || !isTopFrame || !origin) return;
+  const matches = [...document.querySelectorAll('iframe')].filter((f) => {
+    try {
+      return new URL(f.src, location.href).origin === origin;
+    } catch {
+      return false;
+    }
+  });
+  if (matches.length !== 1) return;
+  ensureVisible(matches[0]);
 }
 
 /** Update the top frame's banner. No-op in every other frame. */

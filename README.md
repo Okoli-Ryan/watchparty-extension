@@ -141,11 +141,14 @@ extension's reload icon to pick up changes).
 
 1. Log in as the admin → **Users** tab → create `user1` and `user2`.
 2. In one Chrome profile, sign in as **user1**. Open a page with a plain HTML5
-   video (e.g. any `.mp4` or an `<video>` test page). Click **Create a room** —
-   a banner appears at the top of the page with the first video already
-   highlighted. Press **↑ ↓** (or **← →**) to step through the page's videos,
-   **Enter** to choose one, **Esc** to back out. Name the room, **Create &
-   host**. Confirm a doc appears under `rooms` in Firestore.
+   video (e.g. any `.mp4` or an `<video>` test page). **Start the video playing
+   first** — many players don't create the `<video>` element until you hit play,
+   and a playing one ranks above a stopped one. Then click **Create a room**: a
+   banner appears at the top of the page with the first video already
+   highlighted. Press **↑ ↓** (or **← →**) to step through the page's videos —
+   each is scrolled into view as you land on it — **Enter** to choose one,
+   **Esc** to back out. Name the room, **Create & host**. Confirm a doc appears
+   under `rooms` in Firestore.
 3. In a second profile (or another machine), sign in as **user2**. The room
    shows under **Active rooms** → **Join** → the tab navigates to the URL and a
    "Click to start watching together" button appears; click it.
