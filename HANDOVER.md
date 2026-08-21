@@ -131,6 +131,15 @@ mapping each failure to its cause.
 6. **The dev server.** `npm run dev` serves the popup via a redirect stub and
    flashes "Cannot connect to localhost:5173" endlessly, because a popup is
    destroyed on every focus loss. Use `npm run watch` (build --watch) instead.
+7. **Consuming state on *send* rather than on *delivery*.** `broadcastToTab()`
+   posts to `session.frameKey`, which is null until a frame attaches — and a
+   joining viewer's first room snapshot almost always arrives before its page has
+   finished loading. The viewer's APPLY marked `lastAppliedSig` as applied
+   regardless, so every later snapshot matched the signature and returned early:
+   the viewer played from 0:00 and stayed there until the host next did
+   something. `broadcastToTab` now reports whether it delivered, and the
+   background re-aligns on `ATTACHED`. If you add another "only send when
+   changed" path, check delivery before you consume the change.
 
 ---
 

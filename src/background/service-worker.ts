@@ -582,16 +582,19 @@ function subscribe() {
         pushRoomInfo();
         return;
       }
-      lastAppliedSig = sig;
-      const attached = !!s.frameKey && ports.has(s.frameKey);
+      const delivered = broadcastToTab(s.tabId, { t: 'APPLY', playback: room.playback });
+      // Only mark it applied if it actually reached a frame. A joining viewer's
+      // first snapshot routinely lands before its page has finished loading;
+      // consuming the signature then meant every later snapshot matched it and
+      // returned early, so the viewer sat at 0:00 until the host next acted.
+      if (delivered) lastAppliedSig = sig;
       log(
         'bg',
         'room snapshot → APPLY',
         `t=${room.playback.currentTime?.toFixed?.(2)}`,
         `playing=${room.playback.isPlaying}`,
-        attached ? `frame=${s.frameKey}` : '⚠ NOT ATTACHED to any frame yet',
+        delivered ? `frame=${s.frameKey}` : '⚠ NOT ATTACHED yet — will retry on ATTACHED',
       );
-      broadcastToTab(s.tabId, { t: 'APPLY', playback: room.playback });
     }
 
     pushRoomInfo();
@@ -737,11 +740,31 @@ function attachTab(tabId: number) {
   } as BgToContent);
 }
 
-/** Send to the frame we're attached to (not the whole tab). */
-function broadcastToTab(_tabId: number, msg: BgToContent) {
+/**
+ * Send to the frame we're attached to (not the whole tab).
+ *
+ * Returns whether it actually went anywhere. Callers that consume state on send
+ * — the viewer's APPLY, which advances `lastAppliedSig` — must check: a message
+ * posted while `frameKey` is still null is silently lost, and treating it as
+ * delivered means it is never retried.
+ */
+function broadcastToTab(_tabId: number, msg: BgToContent): boolean {
   const key = session?.frameKey;
-  if (!key) return;
-  ports.get(key)?.port.postMessage(msg);
+  if (!key) return false;
+  const conn = ports.get(key);
+  if (!conn) return false;
+  conn.port.postMessage(msg);
+  return true;
+}
+
+/**
+ * How long ago the host published the room's current playback, measured on the
+ * calibrated server clock. Never compare `updatedAt` to `Date.now()` directly —
+ * see DECISIONS.md #6.
+ */
+function playbackAgeMs(): number {
+  const writtenAt = currentRoom?.playback?.updatedAt?.toMillis?.() ?? 0;
+  return writtenAt ? Math.max(0, serverNow() - writtenAt) : 0;
 }
 
 /**
@@ -900,6 +923,22 @@ async function handleContentMessage(key: string, tabId: number, msg: ContentToBg
       lastError = null;
       pushRoomInfo();
       pushChat();
+      // A viewer has only now got hold of the video, and whatever we knew at
+      // ATTACH time may be long stale — finding the element can take up to
+      // ELEMENT_WAIT_MS, and any APPLY sent while we had no frame went nowhere.
+      // Re-align from the room's current playback, with its age, so the position
+      // is projected forward to where the host is NOW rather than rewound to
+      // wherever they were when they last wrote.
+      if (session && session.role === 'viewer' && session.frameKey === key && currentRoom) {
+        const age = playbackAgeMs();
+        log('bg', `viewer attached → RESYNC (host state is ${Math.round(age / 1000)}s old)`);
+        broadcastToTab(session.tabId, {
+          t: 'RESYNC',
+          playback: currentRoom.playback,
+          elapsedMs: age,
+        });
+        lastAppliedSig = playbackSignature(currentRoom);
+      }
       break;
 
     case 'CHAT_SEND': {
@@ -957,8 +996,7 @@ async function handleContentMessage(key: string, tabId: number, msg: ContentToBg
       // server clock. The content script can't work this out itself: its own
       // copy may be old, and comparing a server timestamp to a local clock is
       // exactly the skew bug we removed elsewhere.
-      const writtenAt = currentRoom.playback?.updatedAt?.toMillis?.() ?? 0;
-      const elapsedMs = writtenAt ? Math.max(0, serverNow() - writtenAt) : 0;
+      const elapsedMs = playbackAgeMs();
       log('bg', `viewer requested resync (host state is ${Math.round(elapsedMs / 1000)}s old)`);
       broadcastToTab(session.tabId, {
         t: 'RESYNC',

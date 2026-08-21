@@ -67,12 +67,23 @@ export class VideoController {
     if (this.role === 'viewer') this.showJoinGate();
     this.cbs.onAttached();
 
-    // Replay any owner state that arrived before the video was ready, so the
-    // viewer starts out matching the owner instead of guessing.
-    if (this.role === 'viewer' && this.lastRemote) {
-      log('viewer', 'replaying owner state buffered during attach');
-      this.lastAppliedMs = 0;
-      this.apply(this.lastRemote);
+    // Start out matching the owner instead of guessing. Two sources, in order:
+    // anything that arrived while we were still looking for the element, and
+    // otherwise the room's playback as it stood when ATTACH was sent.
+    //
+    // `initialRemote` used to be read only on the owner's adopt path, so a
+    // joining viewer ignored the state the background had already handed it,
+    // played from 0:00, and stayed there until the host's next action produced a
+    // fresh snapshot. The background also re-aligns us on ATTACHED, which is
+    // more accurate because it projects for elapsed time — this is the fallback
+    // for the moment before that arrives.
+    if (this.role === 'viewer') {
+      const initial = this.lastRemote ?? this.initialRemote;
+      if (initial) {
+        log('viewer', 'applying owner state known at attach');
+        this.lastAppliedMs = 0;
+        this.apply(initial);
+      }
     }
     if (this.role === 'owner') {
       if (this.ownerMode === 'adopt' && this.initialRemote) {
