@@ -355,6 +355,13 @@ export class Widget {
     const wrap = this.root.querySelector('.wrap');
     if (!wrap) return;
 
+    // The transcript being ON SCREEN is what marks it read — not the click that
+    // opened it. `chatOpen` survives collapsing, so re-expanding a widget whose
+    // chat was already open put the messages back in front of the user without
+    // ever passing through the toggle handler: the badge kept climbing over
+    // messages they were looking at, and nothing could ever clear it.
+    if (this.expanded && this.chatOpen) this.unread = 0;
+
     // Only rebuild the DOM when the *structure* changes. Messages arriving
     // while you're mid-sentence must not wipe the input or steal focus.
     // The role must be part of the signature: host and viewer get different
@@ -608,8 +615,8 @@ export class Widget {
     });
     wrap.querySelector('.chat-toggle')?.addEventListener('click', () => {
       this.chatOpen = !this.chatOpen;
-      // Opening the transcript is what counts as reading it.
-      if (this.chatOpen) this.unread = 0;
+      // No need to clear `unread` here — render() does it for every route that
+      // puts the transcript on screen, this one included.
       this.render();
       if (this.chatOpen) {
         wrap.querySelector<HTMLInputElement>('.chat-input')?.focus();
