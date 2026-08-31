@@ -31,7 +31,18 @@ function clock(seconds: number): string {
  * inherit a room it cannot actually drive. So this observes and chats; it never
  * joins.
  */
-export function RoomView({ room, me, isLive }: { room: Room; me: UserProfile; isLive: boolean }) {
+export function RoomView({
+  room,
+  me,
+  isLive,
+  onBack,
+}: {
+  room: Room;
+  me: UserProfile;
+  isLive: boolean;
+  /** Return to the list. Only reachable in the mobile master/detail layout. */
+  onBack: () => void;
+}) {
   const [members, setMembers] = useState<Member[]>([]);
   // Presence decays on a clock, not on writes: without a tick the watcher list
   // would freeze at its last snapshot once everyone stopped heartbeating.
@@ -64,6 +75,9 @@ export function RoomView({ room, me, isLive }: { room: Room; me: UserProfile; is
     <section className="room">
       <header className="room-head">
         <div className="room-title">
+          <button className="back" onClick={onBack} aria-label="Back to rooms">
+            ‹
+          </button>
           <span className={`dot ${!isLive ? 'off' : playing ? 'playing' : 'paused'}`} />
           <h2>
             {room.visibility === 'private' && '🔒 '}

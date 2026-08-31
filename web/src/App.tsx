@@ -61,9 +61,12 @@ export function App() {
   // holds only the newest page, so a room opened from History may not be in it.
   const { room: selected, loading } = useRoom(selectedId);
 
-  // Land on something useful rather than an empty pane.
+  // Land on something useful rather than an empty pane — but only where both
+  // panes are visible at once. On a phone the layout is master/detail, so
+  // auto-selecting would drop the user into a room before they chose one.
   useEffect(() => {
     if (selectedId || rooms.length === 0) return;
+    if (!window.matchMedia('(min-width: 721px)').matches) return;
     const firstLive = rooms.find((r) => liveIds.has(r.id));
     setSelectedId((firstLive ?? rooms[0]).id);
   }, [rooms, liveIds, selectedId]);
@@ -97,7 +100,7 @@ export function App() {
         </div>
       </header>
 
-      <div className="body">
+      <div className={`body${selectedId ? ' has-selection' : ''}`}>
         <RoomList
           tab={tab}
           onTab={setTab}
@@ -110,7 +113,12 @@ export function App() {
         />
         <main className="main">
           {selected ? (
-            <RoomView room={selected} me={profile} isLive={liveIds.has(selected.id)} />
+            <RoomView
+              room={selected}
+              me={profile}
+              isLive={liveIds.has(selected.id)}
+              onBack={() => setSelectedId(null)}
+            />
           ) : (
             <div className="empty pad">
               {!selectedId
