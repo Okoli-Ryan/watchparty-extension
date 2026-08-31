@@ -130,6 +130,17 @@ Three things differ on Firefox, and the first one will bite you:
 > already open **before** you loaded/reloaded the extension need a page refresh
 > before "Create a room" can reach them.
 
+### Packaging it to send to someone
+
+```bash
+npm run zip           # builds, then release/watchparty-sync-<version>-chrome.zip
+npm run zip:firefox   # same for the Gecko build
+```
+
+The manifest sits at the root of the archive, so the recipient extracts it and
+points **Load unpacked** at the extracted folder — and it is also the layout both
+stores expect for an upload. The archives are gitignored.
+
 For iterative development use `npm run watch` (rebuilds `dist/` on save; click the
 extension's reload icon to pick up changes).
 

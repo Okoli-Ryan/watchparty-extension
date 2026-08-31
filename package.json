@@ -11,7 +11,9 @@
     "build": "tsc --noEmit && vite build",
     "watch": "vite build --watch",
     "build:firefox": "npm run build && node scripts/build-firefox.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "zip": "npm run build && node scripts/zip.mjs chrome",
+    "zip:firefox": "npm run build:firefox && node scripts/zip.mjs firefox"
   },
   "dependencies": {
     "@medv/finder": "^4.0.2",
