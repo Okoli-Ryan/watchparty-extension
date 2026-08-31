@@ -16,6 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { fileURLToPath } from 'node:url';
 
 const TARGETS = {
   chrome: { dir: 'dist', suffix: 'chrome', build: 'npm run build' },
@@ -29,7 +30,11 @@ if (!target) {
   process.exit(1);
 }
 
-const root = path.resolve(import.meta.dirname, '..');
+// fileURLToPath rather than import.meta.dirname: the latter needs Node 20.11+,
+// which would make this script demand a newer Node than the build itself (Vite
+// accepts 18) — and it fails as "paths[0] must be of type string", which names
+// nothing useful.
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = path.join(root, target.dir);
 const outDir = path.join(root, 'release');
 

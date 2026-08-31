@@ -97,7 +97,7 @@ That admin can now create everyone else from the extension's **Users** tab.
 
 **Chrome / Edge**
 ```bash
-npm install
+npm install        # Node 18+ required
 npm run build
 ```
 Then in Chrome: `chrome://extensions` → enable **Developer mode** →
@@ -140,6 +140,10 @@ npm run zip:firefox   # same for the Gecko build
 The manifest sits at the root of the archive, so the recipient extracts it and
 points **Load unpacked** at the extracted folder — and it is also the layout both
 stores expect for an upload. The archives are gitignored.
+
+> **Whoever receives the zip needs nothing but a browser.** It contains only
+> built JS/CSS/HTML — no Node, no npm, no toolchain. Node is required to *make*
+> the zip, not to run the extension.
 
 For iterative development use `npm run watch` (rebuilds `dist/` on save; click the
 extension's reload icon to pick up changes).

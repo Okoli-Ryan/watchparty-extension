@@ -8,16 +8,21 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-// Pick up WP_GECKO_ID from .env when it's there. Absent .env is the normal case
-// for a fresh clone, so a failure here is not worth reporting.
+// Pick up WP_GECKO_ID from .env when it's there. Two ordinary reasons this
+// fails, neither worth reporting: there is no .env (the normal case for a fresh
+// clone), or this is Node < 20.12, where loadEnvFile doesn't exist yet — then
+// WP_GECKO_ID simply has to come from the real environment.
 try {
   process.loadEnvFile();
 } catch {
-  /* no .env — fall back to the ambient environment */
+  /* fall back to the ambient environment */
 }
 
-const root = path.resolve(import.meta.dirname, '..');
+// fileURLToPath rather than import.meta.dirname, which needs Node 20.11+ and
+// would make this script demand a newer Node than the build itself.
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = path.join(root, 'dist');
 const out = path.join(root, 'dist-firefox');
 
