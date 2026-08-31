@@ -7,6 +7,7 @@ import { Login } from './components/Login';
 import { RoomList } from './components/RoomList';
 import { RoomView } from './components/RoomView';
 import { useRoom } from './useRoom';
+import { isMuted, setMuted as persistMuted } from './notify';
 
 // Companion dashboard for the extension: follow rooms and keep chatting from a
 // normal browser tab. It reads the same Firestore project the extension writes
@@ -17,6 +18,7 @@ export function App() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [history, setHistory] = useState<RoomHistoryEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [muted, setMuted] = useState(isMuted);
   const [tab, setTab] = useState<'rooms' | 'history'>('rooms');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Liveness decays on a clock rather than on writes, so re-render periodically
@@ -76,9 +78,23 @@ export function App() {
           <strong>WatchParty Sync</strong>
           <span className="muted"> · {profile.displayName}</span>
         </div>
-        <button className="ghost" onClick={() => logout()}>
-          Sign out
-        </button>
+        <div className="head-actions">
+          <button
+            className={`icon-btn${muted ? '' : ' on'}`}
+            onClick={() => {
+              const next = !muted;
+              setMuted(next);
+              persistMuted(next);
+            }}
+            title={muted ? 'Message sound off' : 'Message sound on'}
+            aria-label={muted ? 'Unmute message sound' : 'Mute message sound'}
+          >
+            {muted ? '🔇' : '🔔'}
+          </button>
+          <button className="ghost" onClick={() => logout()}>
+            Sign out
+          </button>
+        </div>
       </header>
 
       <div className="body">

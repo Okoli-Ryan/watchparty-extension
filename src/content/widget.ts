@@ -1,6 +1,7 @@
 import type { RoomInfo } from '../shared/messages';
 import type { ChatMessage } from '../shared/types';
 import { CHAT_MAX_LEN } from '../shared/constants';
+import { beep } from '../shared/beep';
 
 // Floating on-page widget: a small pill that expands into a status panel.
 // Rendered inside a shadow root so the host page's CSS can't reach it — these
@@ -34,36 +35,6 @@ export interface WidgetCallbacks {
   onTransferHost: (uid: string) => void;
   onReselectVideo: () => void;
   onMove: (pos: WidgetPos) => void;
-}
-
-/**
- * Short two-tone blip for an incoming message, synthesised with WebAudio so no
- * audio asset has to ship (and no host-page CSP can block a media file).
- */
-function beep() {
-  try {
-    const Ctx =
-      (window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext })
-        .AudioContext ??
-      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(660, ctx.currentTime);
-    osc.frequency.setValueAtTime(880, ctx.currentTime + 0.09);
-    // Quiet, and faded out so it doesn't click.
-    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.22);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.24);
-    osc.onended = () => void ctx.close();
-  } catch {
-    /* audio unavailable (no gesture yet, blocked context) — never fatal */
-  }
 }
 
 export class Widget {

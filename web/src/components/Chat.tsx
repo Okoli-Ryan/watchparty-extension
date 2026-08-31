@@ -1,8 +1,27 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { watchMessages, sendMessage } from '../../../src/firebase/chat';
 import { CHAT_MAX_LEN } from '../../../src/shared/constants';
 import type { ChatMessage, Room, UserProfile } from '../../../src/shared/types';
 import { resolveRoomKey, rememberPassphrase, recallPassphrase, type KeyState } from '../roomKey';
+import { notifyMessages } from '../notify';
+
+/** "Today" / "Yesterday" / "12 Aug 2026" for a day separator. */
+function dayLabel(ms: number): string {
+  const d = new Date(ms);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const same = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+  if (same(d, today)) return 'Today';
+  if (same(d, yesterday)) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+const clockTime = (ms: number) =>
+  new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+
+/** Consecutive messages from one person inside this window share a header. */
+const GROUP_WINDOW_MS = 5 * 60 * 1000;
 
 /**
  * Live transcript for one room, plus a composer.
@@ -18,7 +37,11 @@ export function Chat({ room, me }: { room: Room; me: UserProfile }) {
   const [pass, setPass] = useState('');
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [pendingBelow, setPendingBelow] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
+  const atBottomRef = useRef(true);
+  /** null until the first batch lands, so the backfill never alerts. */
+  const seenIds = useRef<Set<string> | null>(null);
 
   // Resolve the key whenever the room changes. A remembered passphrase is tried
   // first so switching back to a private room doesn't prompt again.
@@ -27,6 +50,9 @@ export function Chat({ room, me }: { room: Room; me: UserProfile }) {
     setMessages([]);
     setError(null);
     setPass('');
+    setPendingBelow(0);
+    seenIds.current = null;
+    atBottomRef.current = true;
     void resolveRoomKey(room, recallPassphrase(room.id)).then((s) => {
       if (alive) setKeyState(s);
     });
@@ -41,18 +67,43 @@ export function Chat({ room, me }: { room: Room; me: UserProfile }) {
     return watchMessages(
       room.id,
       keyState.key,
-      setMessages,
+      (next) => {
+        const previous = seenIds.current;
+        if (previous) {
+          const fresh = next.filter((m) => !previous.has(m.id) && m.senderUid !== me.uid);
+          notifyMessages(fresh.length);
+          // Only badge messages the reader cannot currently see.
+          if (fresh.length > 0 && !atBottomRef.current) {
+            setPendingBelow((n) => n + fresh.length);
+          }
+        }
+        seenIds.current = new Set(next.map((m) => m.id));
+        setMessages(next);
+      },
       () => setError('Cannot read chat — check that firestore.rules is deployed.'),
     );
-  }, [room.id, keyState]);
+  }, [room.id, keyState, me.uid]);
 
-  // Pin to the newest message unless the reader has scrolled up.
+  // Pin to the newest message unless the reader has scrolled up to read back.
   useLayoutEffect(() => {
     const el = listRef.current;
-    if (!el) return;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    if (atBottom) el.scrollTop = el.scrollHeight;
+    if (el && atBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [messages]);
+
+  const onScroll = useCallback(() => {
+    const el = listRef.current;
+    if (!el) return;
+    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    if (atBottomRef.current) setPendingBelow(0);
+  }, []);
+
+  const jumpToLatest = () => {
+    const el = listRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    atBottomRef.current = true;
+    setPendingBelow(0);
+  };
 
   async function unlock(e: React.FormEvent) {
     e.preventDefault();
@@ -67,6 +118,7 @@ export function Chat({ room, me }: { room: Room; me: UserProfile }) {
     if (!text || keyState.status !== 'ready') return;
     setSending(true);
     setDraft('');
+    atBottomRef.current = true; // sending always jumps you to your own message
     try {
       await sendMessage(room.id, keyState.key, me, text.slice(0, CHAT_MAX_LEN));
     } catch {
@@ -93,9 +145,9 @@ export function Chat({ room, me }: { room: Room; me: UserProfile }) {
         <form className="unlock" onSubmit={unlock}>
           <div className="lock-title">🔒 Private room</div>
           <p className="muted small">
-            The key is derived from the room's passphrase and is never stored anywhere, so
-            it has to be entered here. Nobody — including the project owner — can read this
-            chat without it.
+            The key is derived from the room's passphrase and is never stored anywhere, so it
+            has to be entered here. Nobody — including the project owner — can read this chat
+            without it.
           </p>
           <input
             type="password"
@@ -114,30 +166,55 @@ export function Chat({ room, me }: { room: Room; me: UserProfile }) {
 
   return (
     <div className="chat">
-      {error && <div className="alert error">{error}</div>}
-      <div className="messages" ref={listRef}>
+      {error && <div className="alert error side">{error}</div>}
+
+      <div className="messages" ref={listRef} onScroll={onScroll}>
         {messages.length === 0 ? (
           <div className="empty">No messages yet — say hello 👋</div>
         ) : (
-          messages.map((m) => (
-            <div key={m.id} className={`msg${m.senderUid === me.uid ? ' mine' : ''}`}>
-              <div className="msg-head">
-                <span className="who">{m.senderName}</span>
-                <span className="at">{new Date(m.at).toLocaleTimeString(undefined, {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}</span>
+          messages.map((m, i) => {
+            const prev = i > 0 ? messages[i - 1] : null;
+            const newDay = !prev || dayLabel(prev.at) !== dayLabel(m.at);
+            // A run of messages from one person reads as one block; repeating
+            // the name on every line turns a long transcript into noise.
+            const startsGroup =
+              newDay || !prev || prev.senderUid !== m.senderUid || m.at - prev.at > GROUP_WINDOW_MS;
+            const mine = m.senderUid === me.uid;
+            return (
+              <div key={m.id}>
+                {newDay && (
+                  <div className="day">
+                    <span>{dayLabel(m.at)}</span>
+                  </div>
+                )}
+                <div className={`msg${mine ? ' mine' : ''}${startsGroup ? ' lead' : ''}`}>
+                  {startsGroup && (
+                    <div className="msg-head">
+                      <span className="who">{mine ? 'You' : m.senderName}</span>
+                      <span className="at">{clockTime(m.at)}</span>
+                    </div>
+                  )}
+                  <div className="body" title={clockTime(m.at)}>
+                    {m.text}
+                  </div>
+                </div>
               </div>
-              <div className="body">{m.text}</div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
+
+      {pendingBelow > 0 && (
+        <button className="jump" onClick={jumpToLatest}>
+          {pendingBelow} new message{pendingBelow === 1 ? '' : 's'} ↓
+        </button>
+      )}
+
       <form className="composer" onSubmit={send}>
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="Message…"
+          placeholder={`Message ${room.name}…`}
           maxLength={CHAT_MAX_LEN}
           autoComplete="off"
         />
