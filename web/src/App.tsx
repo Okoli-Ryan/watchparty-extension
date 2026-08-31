@@ -6,6 +6,7 @@ import type { Room, RoomHistoryEntry, UserProfile } from '../../src/shared/types
 import { Login } from './components/Login';
 import { RoomList } from './components/RoomList';
 import { RoomView } from './components/RoomView';
+import { useRoom } from './useRoom';
 
 // Companion dashboard for the extension: follow rooms and keep chatting from a
 // normal browser tab. It reads the same Firestore project the extension writes
@@ -15,37 +16,55 @@ export function App() {
   const [profile, setProfile] = useState<UserProfile | null | undefined>(undefined);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [history, setHistory] = useState<RoomHistoryEntry[]>([]);
-  const [tab, setTab] = useState<'live' | 'history'>('live');
+  const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<'rooms' | 'history'>('rooms');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Liveness is derived from a heartbeat age, so it has to be re-evaluated on a
-  // timer — a room going stale produces no Firestore write to re-render on.
+  // Liveness decays on a clock rather than on writes, so re-render periodically
+  // — a room going stale produces no snapshot to re-render on.
   const [, setTick] = useState(0);
 
   useEffect(() => watchAuth((p) => setProfile(p)), []);
-  useEffect(() => watchRooms(setRooms), []);
+
+  // Subscribe only once signed in. Firestore rules require auth to read rooms,
+  // and a listener that errors is never retried — subscribing too early would
+  // leave an empty list for the whole session.
+  useEffect(() => {
+    if (!profile) return;
+    setError(null);
+    return watchRooms(setRooms, (err) =>
+      setError(
+        err.message.includes('permission')
+          ? 'Cannot read rooms — check that firestore.rules is deployed.'
+          : `Cannot read rooms: ${err.message}`,
+      ),
+    );
+  }, [profile]);
+
   useEffect(() => {
     if (!profile) return;
     return watchHistory(profile.uid, setHistory);
   }, [profile]);
+
   useEffect(() => {
     const id = window.setInterval(() => setTick((t) => t + 1), 5000);
     return () => window.clearInterval(id);
   }, []);
 
-  const live = useMemo(() => {
+  const liveIds = useMemo(() => {
     const ref = roomsRef(rooms);
-    return rooms.filter((r) => isRoomLive(r, ref));
+    return new Set(rooms.filter((r) => isRoomLive(r, ref)).map((r) => r.id));
   }, [rooms]);
-  const liveIds = useMemo(() => new Set(live.map((r) => r.id)), [live]);
-  const selected = useMemo(
-    () => rooms.find((r) => r.id === selectedId) ?? null,
-    [rooms, selectedId],
-  );
 
-  // Land on something useful instead of an empty pane.
+  // The selection is watched directly rather than looked up in `rooms`: the list
+  // holds only the newest page, so a room opened from History may not be in it.
+  const { room: selected, loading } = useRoom(selectedId);
+
+  // Land on something useful rather than an empty pane.
   useEffect(() => {
-    if (!selectedId && live.length > 0) setSelectedId(live[0].id);
-  }, [live, selectedId]);
+    if (selectedId || rooms.length === 0) return;
+    const firstLive = rooms.find((r) => liveIds.has(r.id));
+    setSelectedId((firstLive ?? rooms[0]).id);
+  }, [rooms, liveIds, selectedId]);
 
   if (profile === undefined) return <div className="boot">Loading…</div>;
   if (profile === null) return <Login />;
@@ -66,22 +85,23 @@ export function App() {
         <RoomList
           tab={tab}
           onTab={setTab}
-          live={live}
+          rooms={rooms}
           history={history}
           liveIds={liveIds}
           selectedId={selectedId}
           onSelect={setSelectedId}
+          error={error}
         />
         <main className="main">
           {selected ? (
             <RoomView room={selected} me={profile} isLive={liveIds.has(selected.id)} />
           ) : (
             <div className="empty pad">
-              {selectedId
-                ? // History keeps a room after the room document itself is gone,
-                  // and `watchRooms` only loads the most recent page of rooms.
-                  'That room is no longer available.'
-                : 'Select a room to see its activity and chat.'}
+              {!selectedId
+                ? 'Select a room to see its activity and chat.'
+                : loading
+                  ? 'Opening room…'
+                  : 'That room has been deleted.'}
             </div>
           )}
         </main>

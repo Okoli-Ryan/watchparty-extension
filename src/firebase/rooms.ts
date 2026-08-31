@@ -123,11 +123,22 @@ export async function getRoom(id: string): Promise<Room | null> {
  * them with `isRoomLive`, so an ended room shows up under History instead of
  * lingering in the active list forever.
  */
-export function watchRooms(cb: (rooms: Room[]) => void): Unsubscribe {
+export function watchRooms(
+  cb: (rooms: Room[]) => void,
+  onError?: (err: Error) => void,
+): Unsubscribe {
   const q = query(roomsCol(), orderBy('createdAt', 'desc'), limit(ROOM_PAGE_SIZE));
-  return onSnapshot(q, (snap) => {
-    cb(snap.docs.map((d) => roomFromSnap(d.id, d.data())));
-  });
+  return onSnapshot(
+    q,
+    (snap) => {
+      cb(snap.docs.map((d) => roomFromSnap(d.id, d.data())));
+    },
+    // Without this a failed listen (rules not deployed, offline, no auth yet)
+    // is completely silent — and a silently empty list is indistinguishable
+    // from "there are genuinely no rooms". Firestore does not retry a listener
+    // that has errored, so it stays empty forever.
+    (err) => onError?.(err),
+  );
 }
 
 function activityMs(r: Room): number {
@@ -135,14 +146,26 @@ function activityMs(r: Room): number {
 }
 
 /**
- * Reference "now" for room liveness. Server timestamps can sit ahead of a skewed
- * client clock, so take the later of the two — the same clock-skew guard used
- * for member presence.
+ * Reference "now" for room liveness — the freshest heartbeat any room has
+ * written, which is at most one ROOM_TOUCH_MS old and therefore a good stand-in
+ * for the server's clock.
+ *
+ * This used to be `Math.max(Date.now(), max)`, which compares a SERVER timestamp
+ * against the LOCAL clock — the exact mixing DECISIONS.md #6 exists to forbid.
+ * It guarded only one direction: a local clock running *behind* the server was
+ * fine, but one running more than ROOM_STALE_MS *ahead* made `ref` the local
+ * clock, so every room — including the one the user was sitting in — aged past
+ * the staleness limit at once and the active list came up empty.
+ *
+ * Ageing relative to the freshest heartbeat has a known cost: if every room
+ * stops at the same moment, nothing advances `ref` and they all stay "live"
+ * until a snapshot arrives. That is a stale row in a list, which is a great deal
+ * better than showing none at all.
  */
 export function roomsRef(rooms: Room[]): number {
   let max = 0;
   for (const r of rooms) max = Math.max(max, activityMs(r));
-  return Math.max(Date.now(), max);
+  return max || Date.now();
 }
 
 /** A room is live if it wasn't closed AND its heartbeat is recent. */

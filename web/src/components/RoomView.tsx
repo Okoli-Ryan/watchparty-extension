@@ -79,6 +79,13 @@ export function RoomView({ room, me, isLive }: { room: Room; me: UserProfile; is
         <Stat label="Last active" value={timeAgo(room.lastActiveAt?.toMillis?.())} />
       </div>
 
+      {!isLive && (
+        <div className="note">
+          This room has ended, so nobody is watching and playback can't be controlled — but
+          its chat is still here, and you can keep posting to it.
+        </div>
+      )}
+
       <div className="watchers">
         {present.length === 0 ? (
           <span className="muted small">Nobody is in this room right now.</span>

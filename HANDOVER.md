@@ -122,7 +122,14 @@ mapping each failure to its cause.
    only their own pending write, so the reconciler concluded the host was gone
    and promoted the joiner. Ownership decisions must check `fromCache`.
 3. **Server timestamps vs `Date.now()`.** Mixing them killed rooms after ten
-   seconds. Use `serverNow()` from `presence.ts`.
+   seconds. Use `serverNow()` from `presence.ts`. **This one recurs** — it came
+   back in `roomsRef()`, which used `Math.max(Date.now(), freshestHeartbeat)`
+   under a comment claiming to guard skew. It guarded only one direction: a
+   local clock running more than `ROOM_STALE_MS` *ahead* of the server made every
+   room age out at once, so the active list came up empty while the user was
+   sitting in a room. Room liveness is now measured against the freshest
+   heartbeat alone. If you write another freshness check, the rule is absolute:
+   compare server time to server time, never to the local clock.
 4. **Port disconnects during intentional navigation.** Joining navigates the
    tab, which closes the old page's port; that used to read as "left the room"
    and tore down the session. `pendingNav` guards it.
