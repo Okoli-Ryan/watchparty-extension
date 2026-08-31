@@ -114,6 +114,8 @@ export class Widget {
     this.root.innerHTML = `<style>${CSS}</style><div class="toasts"></div><div class="wrap"></div>`;
     document.body.appendChild(this.host);
     window.addEventListener('resize', this.onViewportResize);
+    document.addEventListener('fullscreenchange', this.onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', this.onFullscreenChange);
     this.render();
   }
 
@@ -266,6 +268,39 @@ export class Widget {
     this.applyPosition();
   }
 
+  /**
+   * Follow the page in and out of fullscreen.
+   *
+   * A fullscreen element is promoted to the browser's *top layer*: it and its
+   * descendants are the only things painted, so a `position: fixed` host sitting
+   * on `document.body` simply disappears. Re-parenting the host INTO the
+   * fullscreen element puts it back in the rendered subtree; `position: fixed`
+   * still resolves against the viewport there, so it lands where it was.
+   *
+   * The shadow root travels with the host, so no state, styling or listener is
+   * lost — the widget does not re-render.
+   *
+   * LIMIT: this only works when the fullscreen element is in THIS document. If
+   * the video lives in a cross-origin player iframe and that iframe goes
+   * fullscreen, the top document's `fullscreenElement` is the <iframe> itself,
+   * which cannot take our host as a child. Covering that would mean rendering a
+   * second widget inside the player frame, which DECISIONS.md #12 rejects for
+   * good reasons (clipped to the frame, destroyed on every iframe reload).
+   */
+  private onFullscreenChange = () => {
+    const host = this.host;
+    if (!host) return;
+    const fs = document.fullscreenElement;
+    // An <iframe> going fullscreen cannot host our element — leave it be rather
+    // than moving the widget somewhere it will never be painted.
+    const target =
+      fs && fs.nodeName !== 'IFRAME' && fs !== host && !host.contains(fs) ? fs : document.body;
+    if (host.parentNode !== target) target.appendChild(host);
+    // The fullscreen box is a different size to the page, so a saved position
+    // can now be out of bounds.
+    this.onViewportResize();
+  };
+
   /** A smaller viewport can strand a saved position off screen. */
   private onViewportResize = () => {
     if (!this.host || !this.pos) return;
@@ -305,6 +340,8 @@ export class Widget {
 
   destroy() {
     window.removeEventListener('resize', this.onViewportResize);
+    document.removeEventListener('fullscreenchange', this.onFullscreenChange);
+    document.removeEventListener('webkitfullscreenchange', this.onFullscreenChange);
     this.host?.remove();
     this.host = null;
     this.root = null;
