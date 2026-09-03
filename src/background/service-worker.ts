@@ -23,7 +23,7 @@ import {
 } from '../firebase/presence';
 import { COLLECTIONS, ROOM_TOUCH_MS, CHAT_MAX_LEN, HEARTBEAT_MS } from '../shared/constants';
 import { ext } from '../shared/ext';
-import { recordAttendance } from '../firebase/history';
+import { recordAttendance, markRead, watchHistoryEntry } from '../firebase/history';
 import { sendMessage, watchMessages } from '../firebase/chat';
 import { importRoomKey, deriveKeyFromPassphrase, checkVerifier } from '../shared/crypto';
 import { log, warn, fail } from '../shared/log';
@@ -84,6 +84,9 @@ let currentRoom: Room | null = null;
 let unsubRoom: Unsubscribe | null = null;
 let unsubMembers: Unsubscribe | null = null;
 let unsubChat: Unsubscribe | null = null;
+let unsubReadState: Unsubscribe | null = null;
+/** Newest chat message this user has read, from their shared history entry. */
+let lastReadAt = 0;
 /** Chat key for the active room; derived (private) or imported (public). */
 let chatKey: CryptoKey | null = null;
 
@@ -210,6 +213,28 @@ function pushChat() {
   broadcastToTopFrame(s.tabId, { t: 'CHAT', messages: lastMessages });
 }
 
+/**
+ * Messages newer than this user's read position, from anyone but them.
+ *
+ * Derived on every push rather than accumulated, so it settles the moment
+ * `lastReadAt` advances — including when the advance came from the web
+ * dashboard rather than from this browser.
+ */
+function unreadCount(): number {
+  const uid = session?.me.uid;
+  if (!uid) return 0;
+  return lastMessages.filter((m) => m.at > lastReadAt && m.senderUid !== uid).length;
+}
+
+/** Record how far the user has read, locally and for their other clients. */
+function recordRead(at: number) {
+  const s = session;
+  if (!s || at <= lastReadAt) return;
+  lastReadAt = at;
+  void markRead(s.me.uid, s.roomId, at);
+  pushRoomInfo();
+}
+
 /** Push the current room state to the on-page widget. */
 function pushRoomInfo() {
   const s = session;
@@ -228,6 +253,7 @@ function pushRoomInfo() {
       isHost: m.uid === currentRoom!.ownerUid,
     })),
     error: lastError,
+    unread: unreadCount(),
   };
   broadcastToTopFrame(s.tabId, { t: 'ROOM_INFO', info });
 }
@@ -632,6 +658,15 @@ function subscribe() {
     warn('bg', 'no chat key for this room — chat disabled');
   }
 
+  // The user's own read position, which any of their clients may advance. This
+  // is what lets reading in the web dashboard settle the widget's badge here.
+  unsubReadState = watchHistoryEntry(s.me.uid, s.roomId, (entry) => {
+    const at = entry?.lastReadAt ?? 0;
+    if (at <= lastReadAt) return;
+    lastReadAt = at;
+    pushRoomInfo();
+  });
+
   unsubMembers = watchMembers(s.roomId, async (members, fromCache) => {
     if (!currentRoom || !session) return;
 
@@ -698,7 +733,9 @@ async function teardownSession(opts: { leave: boolean }) {
   unsubRoom?.();
   unsubMembers?.();
   unsubChat?.();
-  unsubRoom = unsubMembers = unsubChat = null;
+  unsubReadState?.();
+  unsubRoom = unsubMembers = unsubChat = unsubReadState = null;
+  lastReadAt = 0;
   lastMembers = [];
   lastMessages = [];
   liveMemberCount = 0;
@@ -982,6 +1019,13 @@ async function handleContentMessage(key: string, tabId: number, msg: ContentToBg
           lastAppliedSig = playbackSignature(currentRoom);
         }
       }
+      break;
+
+    case 'CHAT_READ':
+      // The widget has the transcript on screen. Recording it here rather than
+      // zeroing a counter in the widget is what makes the state shareable.
+      if (!session || session.tabId !== tabId) return;
+      recordRead(msg.at);
       break;
 
     case 'CHAT_SEND': {

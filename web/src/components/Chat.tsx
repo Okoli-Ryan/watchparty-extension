@@ -4,6 +4,8 @@ import { CHAT_MAX_LEN } from '../../../src/shared/constants';
 import type { ChatMessage, Room, UserProfile } from '../../../src/shared/types';
 import { resolveRoomKey, rememberPassphrase, recallPassphrase, type KeyState } from '../roomKey';
 import { notifyMessages } from '../notify';
+import { useResubscribe } from '../useResubscribe';
+import { markRead } from '../../../src/firebase/history';
 
 /** "Today" / "Yesterday" / "12 Aug 2026" for a day separator. */
 function dayLabel(ms: number): string {
@@ -34,6 +36,7 @@ export function Chat({ room, me }: { room: Room; me: UserProfile }) {
   const [keyState, setKeyState] = useState<KeyState>({ status: 'locked' });
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const { nonce, retry } = useResubscribe();
   const [pass, setPass] = useState('');
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -79,10 +82,24 @@ export function Chat({ room, me }: { room: Room; me: UserProfile }) {
         }
         seenIds.current = new Set(next.map((m) => m.id));
         setMessages(next);
+        // Having the room open IS reading it. Recording the position in the
+        // user's history entry is what settles the extension widget's unread
+        // badge — the two clients share this rather than each counting alone.
+        const newest = next[next.length - 1];
+        if (newest) void markRead(me.uid, room.id, newest.at);
       },
-      () => setError('Cannot read chat — check that firestore.rules is deployed.'),
+      (err) => {
+        setError(
+          err.message.includes('permission')
+            ? 'Cannot read chat — check that firestore.rules is deployed.'
+            : 'Chat connection lost — reconnecting…',
+        );
+        // onSnapshot never retries itself, so without this the transcript stops
+        // updating until the page is reloaded.
+        setTimeout(retry, 3000);
+      },
     );
-  }, [room.id, keyState, me.uid]);
+  }, [room.id, keyState, me.uid, nonce, retry]);
 
   // Pin to the newest message unless the reader has scrolled up to read back.
   useLayoutEffect(() => {

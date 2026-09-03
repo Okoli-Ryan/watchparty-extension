@@ -95,6 +95,16 @@ export interface RoomHistoryEntry {
   lastAttendedAt: number | null;
   /** When the room itself was created (denormalised for the history list). */
   roomCreatedAt: number | null;
+  /**
+   * Epoch ms of the newest chat message this user has actually seen, shared by
+   * every client they are signed in on.
+   *
+   * Unread counts are DERIVED from this rather than tallied locally. A counter
+   * that only ever increments in one page can never be settled from anywhere
+   * else — reading on the web could not clear the extension's badge, because
+   * nothing outside that content script could reach it.
+   */
+  lastReadAt: number | null;
 }
 
 export type MemberRole = 'owner' | 'viewer';

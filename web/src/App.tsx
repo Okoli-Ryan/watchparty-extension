@@ -8,6 +8,7 @@ import { RoomList } from './components/RoomList';
 import { RoomView } from './components/RoomView';
 import { useRoom } from './useRoom';
 import { isMuted, setMuted as persistMuted } from './notify';
+import { useResubscribe } from './useResubscribe';
 
 // Companion dashboard for the extension: follow rooms and keep chatting from a
 // normal browser tab. It reads the same Firestore project the extension writes
@@ -19,6 +20,7 @@ export function App() {
   const [history, setHistory] = useState<RoomHistoryEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [muted, setMuted] = useState(isMuted);
+  const { nonce, retry } = useResubscribe();
   const [tab, setTab] = useState<'rooms' | 'history'>('rooms');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Liveness decays on a clock rather than on writes, so re-render periodically
@@ -33,14 +35,17 @@ export function App() {
   useEffect(() => {
     if (!profile) return;
     setError(null);
-    return watchRooms(setRooms, (err) =>
+    return watchRooms(setRooms, (err) => {
       setError(
         err.message.includes('permission')
           ? 'Cannot read rooms — check that firestore.rules is deployed.'
-          : `Cannot read rooms: ${err.message}`,
-      ),
-    );
-  }, [profile]);
+          : 'Lost connection to the room list — reconnecting…',
+      );
+      // onSnapshot never retries after an error; without this the list is stale
+      // for the rest of the session.
+      setTimeout(retry, 3000);
+    });
+  }, [profile, nonce, retry]);
 
   useEffect(() => {
     if (!profile) return;

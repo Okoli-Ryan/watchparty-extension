@@ -125,6 +125,15 @@ export interface RoomInfo {
   memberList: { uid: string; name: string; isHost: boolean }[];
   /** Player error raised in the video frame, surfaced on the top-frame widget. */
   error: string | null;
+  /**
+   * Unread chat, computed in the background from the user's shared read
+   * position rather than tallied by the widget.
+   *
+   * It has to be derived: a counter living in the content script could only ever
+   * be incremented there, so reading the same conversation in the web dashboard
+   * left the widget's badge climbing with no way to settle it.
+   */
+  unread: number;
 }
 
 /** Content → Background over the port. */
@@ -164,6 +173,10 @@ export type ContentToBg =
   | { t: 'ATTACH_ERROR'; reason: string }
   | { t: 'LEAVE' } // user hit "Leave" in the on-page widget
   | { t: 'CHAT_SEND'; text: string } // plaintext; encrypted in the background
+  // The transcript is on screen and this is the newest message in it. The
+  // background records it as the user's read position, which is shared with
+  // every other client they are signed in on.
+  | { t: 'CHAT_READ'; at: number }
   | { t: 'OPEN_DASHBOARD' } // widget button → background opens the tab
   | { t: 'RESYNC_REQUEST' } // viewer asked to re-align with the host
   | { t: 'RESYNC_DONE'; text: string } // what the re-align actually did

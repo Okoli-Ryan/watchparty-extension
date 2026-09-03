@@ -35,6 +35,8 @@ export interface WidgetCallbacks {
   onTransferHost: (uid: string) => void;
   onReselectVideo: () => void;
   onMove: (pos: WidgetPos) => void;
+  /** The transcript is on screen up to this message timestamp. */
+  onChatRead: (at: number) => void;
 }
 
 export class Widget {
@@ -49,8 +51,18 @@ export class Widget {
   private seenMessageIds: Set<string> | null = null;
   private beepEnabled = true;
   private reactionOpen = false;
-  /** Messages from others that arrived while the chat wasn't on screen. */
-  private unread = 0;
+  /**
+   * Messages from others the user has not read yet.
+   *
+   * Owned by the background and pushed in on ROOM_INFO, not tallied here: a
+   * counter local to this content script could only ever be incremented by it,
+   * so reading the same conversation in the web dashboard had no way to settle
+   * it. It is derived from a read position shared across all of the user's
+   * clients.
+   */
+  private get unread(): number {
+    return this.info?.unread ?? 0;
+  }
   private resyncTimer: ReturnType<typeof setTimeout> | undefined;
   /** Half-typed chat message, preserved across structural rebuilds. */
   private draft = '';
@@ -115,8 +127,6 @@ export class Widget {
         for (const m of fresh) {
           if (isReaction(m.text)) this.showToast(m.senderName, m.text.trim());
         }
-        // Nobody is reading the transcript, so flag these as unread.
-        this.unread += fresh.length;
       }
     }
 
@@ -331,7 +341,14 @@ export class Widget {
     // chat was already open put the messages back in front of the user without
     // ever passing through the toggle handler: the badge kept climbing over
     // messages they were looking at, and nothing could ever clear it.
-    if (this.expanded && this.chatOpen) this.unread = 0;
+    //
+    // Reporting the read position rather than zeroing a local counter is what
+    // lets the same conversation read in the web dashboard settle this badge —
+    // the background owns the count and shares it across every client.
+    if (this.expanded && this.chatOpen) {
+      const newest = this.messages[this.messages.length - 1];
+      if (newest) this.cbs.onChatRead(newest.at);
+    }
 
     // Only rebuild the DOM when the *structure* changes. Messages arriving
     // while you're mid-sentence must not wipe the input or steal focus.

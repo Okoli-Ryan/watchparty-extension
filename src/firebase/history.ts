@@ -44,6 +44,34 @@ export function setFavourite(uid: string, roomId: string, favourite: boolean): P
   return updateDoc(historyRef(uid, roomId), { favourite }).catch(() => undefined);
 }
 
+/**
+ * Record how far this user has read a room's chat, as the epoch ms of the newest
+ * message they have seen.
+ *
+ * `setDoc(..., merge)` rather than `updateDoc`: the history entry may not exist
+ * yet for a room being observed from the dashboard without ever having joined it
+ * from the extension.
+ */
+export function markRead(uid: string, roomId: string, at: number): Promise<void> {
+  return setDoc(historyRef(uid, roomId), { roomId, lastReadAt: at }, { merge: true }).catch(
+    () => undefined,
+  );
+}
+
+/**
+ * Live view of one history entry. The extension watches this so a read that
+ * happens in the web dashboard settles the widget's unread badge, and vice versa.
+ */
+export function watchHistoryEntry(
+  uid: string,
+  roomId: string,
+  cb: (entry: RoomHistoryEntry | null) => void,
+): Unsubscribe {
+  return onSnapshot(historyRef(uid, roomId), (snap) =>
+    cb(snap.exists() ? entryFromSnap(snap.id, snap.data()) : null),
+  );
+}
+
 export function removeFromHistory(uid: string, roomId: string): Promise<void> {
   return deleteDoc(historyRef(uid, roomId)).catch(() => undefined);
 }
@@ -56,6 +84,9 @@ function entryFromSnap(id: string, data: any): RoomHistoryEntry {
     favourite: !!data.favourite,
     lastAttendedAt: data.lastAttendedAt?.toMillis?.() ?? null,
     roomCreatedAt: data.roomCreatedAt?.toMillis?.() ?? null,
+    // Written as a plain epoch number, not a Timestamp: it is compared against
+    // ChatMessage.at, which is already toMillis()'d.
+    lastReadAt: typeof data.lastReadAt === 'number' ? data.lastReadAt : null,
   };
 }
 

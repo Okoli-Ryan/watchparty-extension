@@ -129,6 +129,7 @@ function handle(msg: BgToContent) {
           onTransferHost: (uid) => send({ t: 'TRANSFER_HOST', uid }),
           onReselectVideo: () => send({ t: 'RESELECT_VIDEO' }),
           onMove: (pos) => void saveWidgetPos(pos),
+          onChatRead: (at) => send({ t: 'CHAT_READ', at }),
         });
         widget.mount();
         // Restore where the user last dragged it, and apply the saved beep
