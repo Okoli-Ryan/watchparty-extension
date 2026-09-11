@@ -317,3 +317,133 @@ players create no `<video>` element at all until playback starts, so an unstarte
 one is invisible to the picker — and `scoreVideo` ranks a playing video well
 above a stopped one, which is usually the difference between the real player and
 an advert.
+
+---
+
+## 19. The web dashboard is an observer, built from the same package
+
+**Decision.** `web/` lives in the same npm package and imports `src/firebase/*`
+and `src/shared/crypto.ts` directly. It never writes a member document.
+
+**Why one package.** Chat is AES-GCM encrypted. A second copy of the crypto in a
+nested package could drift from the extension's and silently fail to decrypt.
+The same reasoning moved the message blip into `src/shared/beep.ts` rather than
+copying it.
+
+**Why it never joins.** Membership means "a browser with the extension attached
+to this video". It drives the watcher count and automatic ownership handoff
+(entry 8). A dashboard tab is neither: joining would inflate the count and make
+the tab a candidate to inherit a room it cannot drive. So it observes and chats;
+playback control stays where the video is.
+
+**Cost.** Deploying it puts a client to the Firebase project on the open web.
+That turns two existing requirements from theoretical into load-bearing: public
+sign-up disabled, and `firestore.rules` deployed. There is still no App Check.
+
+---
+
+## 20. Unread counts are derived from a shared read position
+
+**Decision.** `users/{uid}/history/{roomId}.lastReadAt` holds the epoch ms of the
+newest message the user has seen. The background watches it
+(`watchHistoryEntry`), derives `unreadCount()` and pushes the number out on
+`ROOM_INFO`. The widget no longer counts anything.
+
+**Why.** The badge used to be `this.unread += fresh.length` inside the content
+script. Nothing outside that page could decrement it, so reading the same
+conversation in the web dashboard left the badge climbing. A "clear" message
+would only have fixed one direction. With a shared position, reading anywhere
+settles the badge everywhere, because no client owns the number.
+
+**Rule.** The transcript being *on screen* marks it read, not the click that
+opened it. `chatOpen` survives collapsing the widget, so the widget reports
+`CHAT_READ` whenever `expanded && chatOpen`.
+
+**Note.** `lastReadAt` is a plain number, not a Timestamp, because it is compared
+against `ChatMessage.at`, which is already `toMillis()`'d.
+
+---
+
+## 21. Firestore listeners must be rebuilt, never trusted to recover
+
+**Decision.** In the web app, every live subscription hangs off
+`useResubscribe()`'s nonce. It is rebuilt on error, when the tab becomes visible
+again, and when the browser reports coming back online. `watchRooms()` takes an
+error callback.
+
+**Why.** `onSnapshot` never retries after an error: the listener stays dead and
+only a page reload rebuilds it. On a phone a dropped socket is routine
+(backgrounding a tab, a network flap), so one drop froze the transcript for the
+rest of the session. Before the error callback existed, a failed listen was also
+indistinguishable from "there are genuinely no rooms".
+
+**Cost.** None worth weighing. Re-listening is cheap because Firestore answers
+from its local cache before it reaches the server.
+
+---
+
+## 22. The widget follows the page into fullscreen by re-parenting
+
+**Decision.** On `fullscreenchange` the widget's host element moves into the
+fullscreen element, and back to `document.body` on exit.
+
+**Why.** A fullscreen element is promoted to the browser's top layer, and only it
+and its descendants are painted, so a host sitting on `body` disappears. The
+shadow root travels with the host, so nothing re-renders and no state, style or
+listener is lost. `position: fixed` still resolves against the viewport, and the
+position is re-clamped afterwards.
+
+**Limit, accepted.** This only works when the fullscreen element is in the top
+document. When a cross-origin player *iframe* goes fullscreen, the top
+document's `fullscreenElement` is the `<iframe>`, which cannot take our host as a
+child, so the widget stays put and is hidden. Covering that case would mean a
+second widget inside the player frame, which entry 12 rejects.
+
+---
+
+## 23. Distribution is Load unpacked from a zip, not a force-installed .crx
+
+**Decision.** `npm run zip` / `zip:firefox` build a store-shaped archive with the
+manifest at the root. Recipients extract it and use Load unpacked.
+
+**What was tried and reverted.** Chrome and Edge reject off-store `.crx` files
+(`CRX_REQUIRED_PROOF_MISSING`). Extensions installed through the
+`ExtensionInstallForcelist` policy are exempt, and a signed-`.crx` plus
+policy-file route was built. It was reverted the same day: a policy-installed
+extension cannot be removed by the person it is installed for (Remove is greyed
+out until the policy goes). That is not acceptable to put on a colleague's
+machine. Nothing had been released or applied anywhere.
+
+**Details that matter.** The zip is written with `zlib` rather than a shell
+command, because there is no portable zip (`Compress-Archive` has produced wrong
+path separators, macOS `zip` adds `__MACOSX`, and GNU tar cannot write zips).
+Timestamps are fixed, so unchanged sources give a byte-identical archive. The
+recipient needs only a browser; Node is required to make the zip, not to run it.
+
+**Related.** Host permissions stay at `*://*/*` because the background navigates
+a viewer's tab and needs the content script there before any user gesture (see
+HANDOVER.md, "Known gaps"). Until that changes, an Unlisted/Hidden store listing
+is the intended route.
+
+---
+
+## 24. Nothing sent once may be lost: consume on delivery, defer rather than drop
+
+**Decision.** `broadcastToTab()` reports whether the message reached a frame, and
+the viewer's `lastAppliedSig` only advances when it did. When a viewer's frame
+sends `ATTACHED`, the background re-aligns it with a `RESYNC` carrying the
+anchor's age. The 150 ms playback throttle holds back the latest seek or rate
+change and flushes it; it never discards one.
+
+**Why.** Sync is event-driven (entry 10), so nothing republishes a state that
+went missing. Two bugs came from breaking that:
+
+1. A joining viewer's first room snapshot arrives before its page has finished
+   loading, while `session.frameKey` is still null. The APPLY went nowhere but
+   was marked applied, so every later snapshot matched the signature and
+   returned early. The viewer played from 0:00 until the host next acted.
+2. A scrub emits a burst of `seeked` events and the last one is the position
+   that matters. Dropping it parked every viewer at an intermediate position.
+
+**Rule.** If you add another "only send when changed" path, check delivery
+before you consume the change, and never throttle by discarding.
