@@ -161,7 +161,11 @@ was older than its own stamp. Resync projected them short and pulled a viewer
 who was exactly in sync back by up to 3s, far outside its 0.5s tolerance. The
 background now records when each heartbeat arrived and advances the position by
 that local-to-local gap before writing (`currentHostPosition()`). A reading older
-than two beats is not written at all.
+than two beats is not written at all. Every host action refreshes the cached
+playhead too, not just the heartbeat. Otherwise a touch landing just after a seek
+or pause wrote the pre-action position with a stamp newer than the action, and
+resync preferred it, sending a viewer back to before the seek or restarting them
+while the host sat paused.
 
 ---
 

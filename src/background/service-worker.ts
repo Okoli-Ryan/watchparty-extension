@@ -197,9 +197,9 @@ function startPresenceTimer() {
  * — well past its 0.5s tolerance. The gap is measured local-to-local, so no
  * clock skew is involved (DECISIONS.md #6).
  *
- * A reading older than two beats (a throttled background tab) is not written at
- * all: extrapolating across it would assume the host kept playing, which is the
- * assumption hostPosition exists to avoid.
+ * A reading older than two beats (a throttled background tab) is not written.
+ * The anchor already on the room doc then simply ages under its honest stamp,
+ * rather than an old reading being stamped as fresh.
  */
 function currentHostPosition(): { currentTime: number; isPlaying: boolean } | null {
   if (!hostPosition) return null;
@@ -994,6 +994,11 @@ async function handleContentMessage(key: string, tabId: number, msg: ContentToBg
       // Only an owner publishes playback. Throttle rapid seeks a touch.
       if (!session || session.role !== 'owner' || session.frameKey !== key) return;
       const now = Date.now();
+      // Every host action also refreshes the playhead the room touch writes.
+      // Heartbeat readings alone went stale across an action: a touch landing
+      // just after a seek or pause wrote the PRE-action position with a stamp
+      // newer than the action, and resyncAnchor() preferred it.
+      hostPosition = { currentTime: msg.currentTime, isPlaying: msg.isPlaying, at: now };
       // Transport changes and on-demand syncs always write; only rapid seeks
       // are throttled.
       const isTransport = msg.event === 'play' || msg.event === 'pause' || msg.event === 'sync';
