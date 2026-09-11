@@ -154,6 +154,15 @@ would be yanked around on a timer, which is the whole point of this entry.
 `resyncAnchor()` picks whichever of the two is newer, bounding the blind spot to
 one touch interval instead of the whole session.
 
+**Stamp the reading, not the write.** The playhead arrives on the 3s heartbeat
+but is written on the touch, up to one beat later, and `serverTimestamp()` stamps
+the *write*. The first version wrote it unadjusted, so a playing host's position
+was older than its own stamp. Resync projected them short and pulled a viewer
+who was exactly in sync back by up to 3s, far outside its 0.5s tolerance. The
+background now records when each heartbeat arrived and advances the position by
+that local-to-local gap before writing (`currentHostPosition()`). A reading older
+than two beats is not written at all.
+
 ---
 
 ## 11. Autoplay is handled in layers, and never with an alert

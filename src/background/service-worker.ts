@@ -134,8 +134,11 @@ let lastRoomTouch = 0;
 let sessionStartedAt = 0;
 /** Media length reported by the video frame; 0 until metadata loads. */
 let videoDuration = 0;
-/** The owner's latest playhead, reported on the heartbeat, written on the touch. */
-let hostPosition: { currentTime: number; isPlaying: boolean } | null = null;
+/**
+ * The owner's latest playhead, reported on the heartbeat, written on the touch.
+ * `at` is the local time the heartbeat arrived — see currentHostPosition().
+ */
+let hostPosition: { currentTime: number; isPlaying: boolean; at: number } | null = null;
 /** No ownership handoff for this long after joining. */
 const JOIN_GRACE_MS = 4000;
 /** Identity of the last playback state pushed to the viewer. */
@@ -178,10 +181,35 @@ function startPresenceTimer() {
     // if every client vanishes without a clean leave.
     if (s.role === 'owner' && Date.now() - lastRoomTouch > ROOM_TOUCH_MS) {
       lastRoomTouch = Date.now();
-      await touchRoom(s.roomId, hostPosition).catch((e) => warn('bg', 'touchRoom failed', e));
+      await touchRoom(s.roomId, currentHostPosition()).catch((e) => warn('bg', 'touchRoom failed', e));
     }
     recountWatchers();
   }, HEARTBEAT_MS);
+}
+
+/**
+ * The host's playhead as of NOW, for the room touch.
+ *
+ * The heartbeat that carried it arrived up to one beat before this write, and
+ * `touchRoom` stamps the position with the server time of the WRITE. Unadjusted,
+ * a playing host's position was older than its own stamp, so resync projected
+ * them short and pulled a viewer who was exactly in sync back by up to one beat
+ * — well past its 0.5s tolerance. The gap is measured local-to-local, so no
+ * clock skew is involved (DECISIONS.md #6).
+ *
+ * A reading older than two beats (a throttled background tab) is not written at
+ * all: extrapolating across it would assume the host kept playing, which is the
+ * assumption hostPosition exists to avoid.
+ */
+function currentHostPosition(): { currentTime: number; isPlaying: boolean } | null {
+  if (!hostPosition) return null;
+  const ageMs = Date.now() - hostPosition.at;
+  if (ageMs > HEARTBEAT_MS * 2) return null;
+  const rate = currentRoom?.playback?.rate || 1;
+  const currentTime = hostPosition.isPlaying
+    ? hostPosition.currentTime + (Math.max(0, ageMs) / 1000) * rate
+    : hostPosition.currentTime;
+  return { currentTime, isPlaying: hostPosition.isPlaying };
 }
 
 function stopPresenceTimer() {
@@ -954,11 +982,11 @@ async function handleContentMessage(key: string, tabId: number, msg: ContentToBg
       // worker alive while a tab is attached — the content script's interval is
       // subject to background-tab throttling and can't be trusted for presence.
       //
-      // It also carries the host's playhead. Throttling is fine here: a stale
-      // cached position is simply not written, and `hostPosition` carries its
-      // own timestamp so a late one can never look fresher than it is.
+      // It also carries the host's playhead. Record when it arrived: the room
+      // touch writes it up to a beat later, and currentHostPosition() advances
+      // it by that gap so the write's server stamp matches the position.
       if (session?.role === 'owner' && session.frameKey === key && msg.currentTime != null) {
-        hostPosition = { currentTime: msg.currentTime, isPlaying: !!msg.isPlaying };
+        hostPosition = { currentTime: msg.currentTime, isPlaying: !!msg.isPlaying, at: Date.now() };
       }
       break;
 
